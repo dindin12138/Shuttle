@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <protocol name="river_xkb_bindings_v1">
-  <copyright>
+ <copyright>
     SPDX-FileCopyrightText: © 2025 Isaac Freund
     SPDX-License-Identifier: MIT
 
@@ -22,8 +22,7 @@
     FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
     IN THE SOFTWARE.
   </copyright>
-
-  <description summary="define xkbcommon-based key bindings">
+ <description summary="xkbcommon-based key bindings">
     This protocol allows the river-window-management-v1 window manager to
     define key bindings in terms of xkbcommon keysyms and other configurable
     properties.
@@ -32,52 +31,46 @@
     "should", "should not", "recommended", "may", and "optional" in this
     document are to be interpreted as described in IETF RFC 2119.
   </description>
-
-  <interface name="river_xkb_bindings_v1" version="2">
-    <description summary="xkbcommon bindings global interface">
+ <interface name="river_xkb_bindings_v1" version="2">
+  <description summary="xkbcommon bindings global interface">
       This global interface should only be advertised to the client if the
       river_window_manager_v1 global is also advertised.
     </description>
-
-    <enum name="error" since="2">
-      <entry name="object_already_created" value="0" since="2"/>
-    </enum>
-
-    <request name="destroy" type="destructor">
-      <description summary="destroy the river_xkb_bindings_v1 object">
+  <enum name="error" since="2">
+   <entry name="object_already_created" value="0" since="2"/>
+  </enum>
+  <request name="destroy" type="destructor">
+   <description summary="destroy the river_xkb_bindings_v1 object">
         This request indicates that the client will no longer use the
         river_xkb_bindings_v1 object.
       </description>
-    </request>
-
-    <request name="get_xkb_binding">
-      <description summary="define a new xkbcommon key binding">
+  </request>
+  <request name="get_xkb_binding">
+   <description summary="define a new xkbcommon key binding">
         Define a key binding for the given seat in terms of an xkbcommon keysym
         and other configurable properties.
 
         The new key binding is not enabled until initial configuration is
         completed and the enable request is made during a manage sequence.
       </description>
-      <arg name="seat" type="object" interface="river_seat_v1"/>
-      <arg name="id" type="new_id" interface="river_xkb_binding_v1"/>
-      <arg name="keysym" type="uint" summary="an xkbcommon keysym"/>
-      <arg name="modifiers" type="uint" enum="river_seat_v1.modifiers"/>
-    </request>
-
-    <request name="get_seat" since="2">
-      <description summary="manage seat-specific state">
+   <arg name="seat" type="object" interface="river_seat_v1"/>
+   <arg name="id" type="new_id" interface="river_xkb_binding_v1"/>
+   <arg name="keysym" type="uint" summary="an xkbcommon keysym"/>
+   <arg name="modifiers" type="uint" enum="river_seat_v1.modifiers"/>
+  </request>
+  <request name="get_seat" since="2">
+   <description summary="manage seat-specific state">
         Create an object to manage seat-specific xkb bindings state.
 
         It is a protocol error to make this request more than once for a given
         river_seat_v1 object.
       </description>
-      <arg name="id" type="new_id" interface="river_xkb_bindings_seat_v1"/>
-      <arg name="seat" type="object" interface="river_seat_v1"/>
-    </request>
-  </interface>
-
-  <interface name="river_xkb_binding_v1" version="2">
-    <description summary="configure a xkb key binding, receive trigger events">
+   <arg name="id" type="new_id" interface="river_xkb_bindings_seat_v1"/>
+   <arg name="seat" type="object" interface="river_seat_v1"/>
+  </request>
+ </interface>
+ <interface name="river_xkb_binding_v1" version="2">
+  <description summary="configure a xkb key binding, receive trigger events">
       This object allows the window manager to configure a xkbcommon key binding
       and receive events when the key binding is triggered.
 
@@ -98,16 +91,14 @@
       physical key event to trigger two key bindings with different keysyms and
       different layout overrides configured.
     </description>
-
-    <request name="destroy" type="destructor">
-      <description summary="destroy the xkb binding object">
+  <request name="destroy" type="destructor">
+   <description summary="destroy the xkb binding object">
         This request indicates that the client will no longer use the xkb key
         binding object and that it may be safely destroyed.
       </description>
-    </request>
-
-    <request name="set_layout_override">
-      <description summary="override currently active xkb layout">
+  </request>
+  <request name="set_layout_override">
+   <description summary="override currently active xkb layout">
         Specify an xkb layout that should be used to translate key events for
         the purpose of triggering this key binding irrespective of the currently
         active xkb layout.
@@ -121,11 +112,10 @@
         This request modifies window management state and may only be made as
         part of a manage sequence, see the river_window_manager_v1 description.
       </description>
-      <arg name="layout" type="uint" summary="0-indexed xkbcommon layout"/>
-    </request>
-
-    <request name="enable">
-      <description summary="enable the key binding">
+   <arg name="layout" type="uint" summary="0-indexed xkbcommon layout"/>
+  </request>
+  <request name="enable">
+   <description summary="enable the key binding">
         This request should be made after all initial configuration has been
         completed and the window manager wishes the key binding to be able to be
         triggered.
@@ -133,20 +123,18 @@
         This request modifies window management state and may only be made as
         part of a manage sequence, see the river_window_manager_v1 description.
       </description>
-    </request>
-
-    <request name="disable">
-      <description summary="disable the key binding">
+  </request>
+  <request name="disable">
+   <description summary="disable the key binding">
         This request may be used to temporarily disable the key binding. It may
         be later re-enabled with the enable request.
 
         This request modifies window management state and may only be made as
         part of a manage sequence, see the river_window_manager_v1 description.
       </description>
-    </request>
-
-    <event name="pressed">
-      <description summary="the key triggering the binding has been pressed">
+  </request>
+  <event name="pressed">
+   <description summary="the key triggering the binding has been pressed">
         This event indicates that the physical key triggering the binding has
         been pressed.
 
@@ -160,10 +148,9 @@
         as soon as possible as the capacity of the compositor to buffer incoming
         input events is finite.
       </description>
-    </event>
-
-    <event name="released">
-      <description summary="the key triggering the binding has been released">
+  </event>
+  <event name="released">
+   <description summary="the key triggering the binding has been released">
         This event indicates that the physical key triggering the binding has
         been released.
 
@@ -182,10 +169,9 @@
         as soon as possible as the capacity of the compositor to buffer incoming
         input events is finite.
       </description>
-    </event>
-
-    <event name="stop_repeat" since="2">
-      <description summary="repeating should be stopped">
+  </event>
+  <event name="stop_repeat" since="2">
+   <description summary="repeating should be stopped">
         This event indicates that repeating should be stopped for the binding if
         the window manager has been repeating some action since the pressed
         event.
@@ -197,23 +183,20 @@
         This event will be followed by a manage_start event after all other new
         state has been sent by the server.
       </description>
-    </event>
-  </interface>
-
-  <interface name="river_xkb_bindings_seat_v1" version="2">
-    <description summary="xkb bindings seat">
+  </event>
+ </interface>
+ <interface name="river_xkb_bindings_seat_v1" version="2">
+  <description summary="xkb bindings seat">
       This object manages xkb bindings state associated with a specific seat.
     </description>
-
-    <request name="destroy" type="destructor" since="2">
-      <description summary="destroy the object">
+  <request name="destroy" type="destructor" since="2">
+   <description summary="destroy the object">
         This request indicates that the client will no longer use the object and
         that it may be safely destroyed.
       </description>
-    </request>
-
-    <request name="ensure_next_key_eaten" since="2">
-      <description summary="ensure the next key press event is eaten">
+  </request>
+  <request name="ensure_next_key_eaten" since="2">
+   <description summary="ensure the next key press event is eaten">
         Ensure that the next non-modifier key press and corresponding release
         events for this seat are not sent to the currently focused surface.
 
@@ -234,10 +217,9 @@
         This request modifies window management state and may only be made as
         part of a manage sequence, see the river_window_manager_v1 description.
       </description>
-    </request>
-
-    <request name="cancel_ensure_next_key_eaten" since="2">
-      <description summary="cancel an ensure_next_key_eaten request">
+  </request>
+  <request name="cancel_ensure_next_key_eaten" since="2">
+   <description summary="cancel an ensure_next_key_eaten request">
         This requests cancels the effect of the latest ensure_next_key_eaten
         request if no key has been eaten due to the request yet. This request
         has no effect if a key has already been eaten or no
@@ -253,16 +235,15 @@
         This request modifies window management state and may only be made as
         part of a manage sequence, see the river_window_manager_v1 description.
       </description>
-    </request>
-
-    <event name="ate_unbound_key" since="2">
-      <description summary="an unbound key press event was eaten">
+  </request>
+  <event name="ate_unbound_key" since="2">
+   <description summary="an unbound key press event was eaten">
         An unbound key press event was eaten due to the ensure_next_key_eaten
         request.
 
         This event will be followed by a manage_start event after all other new
         state has been sent by the server.
       </description>
-    </event>
-  </interface>
+  </event>
+ </interface>
 </protocol>
