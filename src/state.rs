@@ -356,4 +356,62 @@ mod tests {
         ws.cycle_focus(1);
         assert_eq!(ws.focused_window(), Some(10));
     }
+
+    #[test]
+    fn test_cleanup_closed_windows() {
+        let mut shuttle = Shuttle::<u32>::new();
+        let output_id = 1;
+
+        // Initialize the environment
+        shuttle.outputs.insert(output_id, Output::new());
+        let workspace = shuttle
+            .outputs
+            .get_mut(&output_id)
+            .unwrap()
+            .current_workspace_mut();
+
+        // Create and insert windows 1 and 2
+        shuttle.window_db.insert(1, Window::new(1, 800.0, 1000.0));
+        shuttle.window_db.insert(2, Window::new(2, 800.0, 1000.0));
+        workspace.insert_window(1, true);
+        workspace.insert_window(2, true);
+
+        // Verify initial state
+        assert_eq!(shuttle.window_db.len(), 2);
+        assert_eq!(workspace.windows.len(), 2);
+        assert_eq!(workspace.focus_stack.len(), 2);
+
+        // Simulate a window close event from Wayland (Tombstone marking)
+        shuttle.window_db.get_mut(&1).unwrap().is_closed = true;
+
+        // Execute global cleanup
+        shuttle.cleanup_closed_windows();
+
+        // Verify cleanup results: Window 1 must be completely removed from all structures!
+        assert_eq!(
+            shuttle.window_db.len(),
+            1,
+            "Database should only contain 1 window"
+        );
+        assert!(
+            shuttle.window_db.get(&1).is_none(),
+            "Window 1 entity must be destroyed"
+        );
+
+        let cleaned_ws = shuttle
+            .outputs
+            .get_mut(&output_id)
+            .unwrap()
+            .current_workspace_mut();
+        assert_eq!(
+            cleaned_ws.windows,
+            vec![2],
+            "Window 1 must be removed from the view list"
+        );
+        assert_eq!(
+            cleaned_ws.focus_stack,
+            vec![2],
+            "No dangling pointers should remain in the focus stack"
+        );
+    }
 }
