@@ -124,19 +124,62 @@ impl Dispatch<river_window_manager_v1::RiverWindowManagerV1, ()> for AppData {
             // 3. Render Sequence: Apply physical coordinates to nodes
             river_window_manager_v1::Event::RenderStart => {
                 let output_id = 1;
+                let screen_width = 1920.0; // Assuming a 1080p screen width
+
                 if let Some(output) = state.shuttle.outputs.get(&output_id) {
                     if let Some(workspace) = output.workspaces.get(&output.active_workspace_id) {
                         for id in &workspace.windows {
                             if let Some(window) = state.shuttle.window_db.get(id) {
+                                let win_x = window.screen_x;
+                                let win_w = window.width;
+                                let win_h = window.height;
+
+                                // High-Performance Culling
+                                // If the window is completely off-screen (left or right bounds)
+                                if win_x + win_w <= 0.0 || win_x >= screen_width {
+                                    if let Some(node) = state.node_proxies.get(id) {
+                                        // Dispatch to an extreme off-screen coordinate to ensure the GPU skips rendering
+                                        node.set_position(-10000, -10000);
+                                    }
+                                    // Crucial: continue immediately to bypass further protocol requests and save IPC overhead
+                                    continue;
+                                }
+                                // Standard Rendering: Set Position
                                 if let Some(node) = state.node_proxies.get(id) {
-                                    // Set absolute position in the compositor's logical coordinate space
-                                    node.set_position(window.screen_x as i32, 20);
+                                    // Y coordinate is fixed at 20 to leave a top margin
+                                    node.set_position(win_x as i32, 20);
+                                }
+                                // Visual Perfection: Edge Clipping
+                                if let Some(proxy) = state.window_proxies.get(id) {
+                                    let mut clip_x = 0;
+                                    let mut clip_w = win_w as i32;
+
+                                    if win_x < 0.0 {
+                                        // Window is clipped on the left edge
+                                        clip_x = (-win_x) as i32;
+                                        clip_w = (win_w + win_x) as i32;
+                                    } else if win_x + win_w > screen_width {
+                                        // Window is clipped on the right edge
+                                        clip_w = (screen_width - win_x) as i32;
+                                    }
+
+                                    // Check if clipping is actually required
+                                    if clip_w < win_w as i32 {
+                                        // Enable clipping: clips both window content and decorations (shadows/borders)
+                                        // to prevent visual bleeding into adjacent monitors.
+                                        proxy.set_clip_box(clip_x, 0, clip_w, win_h as i32);
+                                        proxy.set_content_clip_box(clip_x, 0, clip_w, win_h as i32);
+                                    } else {
+                                        // Window is fully visible on screen.
+                                        // Per River protocol: Setting a clip box with 0 width/height disables clipping.
+                                        proxy.set_clip_box(0, 0, 0, 0);
+                                        proxy.set_content_clip_box(0, 0, 0, 0);
+                                    }
                                 }
                             }
                         }
                     }
                 }
-
                 // Commit the render sequence to apply changes to the screen
                 state.window_manager.as_ref().unwrap().render_finish();
             }
