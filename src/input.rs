@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use std::hash::Hash;
 
-use crate::config::{Action, Config, parse_keysym, parse_modifier};
+use crate::config::{Action, Config};
 
 /// A generic identifier for a Wayland object used to represent keybindings.
 /// In production, this maps to `wayland_client::backend::ObjectId`.
@@ -32,16 +32,15 @@ impl<ID: BindingId> InputManager<ID> {
     /// the required data for subsequent Wayland registration.
     pub fn prepare_bindings(&self, config: &Config) -> Vec<(u32, u32, Action)> {
         let mut prepared = Vec::new();
-        for bind in &config.bindings {
-            let mods_mask = bind
-                .modifiers
-                .iter()
-                .fold(0, |acc, m| acc | parse_modifier(m));
-
-            let keysym = parse_keysym(&bind.key);
-
-            if keysym != 0 {
-                prepared.push((mods_mask, keysym, bind.action.clone()));
+        if let Some(bindings_map) = &config.keybindings {
+            for (mod_group, keys_map) in bindings_map {
+                let mods_mask = crate::config::parse_modifiers(mod_group);
+                for (key_str, action) in keys_map {
+                    let keysym = crate::config::parse_keysym(key_str);
+                    if keysym != 0 {
+                        prepared.push((mods_mask, keysym, action.clone()));
+                    }
+                }
             }
         }
         prepared
@@ -66,15 +65,6 @@ impl<ID: BindingId> InputManager<ID> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_modifier_and_keysym_parsing() {
-        // Verify parsing based on river_seat_v1.modifiers enumeration
-        assert_eq!(parse_modifier("Super"), 64);
-        assert_eq!(parse_modifier("Shift"), 1);
-        assert_eq!(parse_keysym("h"), 104);
-        assert_eq!(parse_keysym("Enter"), 0xff0d);
-    }
 
     #[test]
     fn test_input_manager_routing() {

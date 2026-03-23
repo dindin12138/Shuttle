@@ -12,6 +12,8 @@ use std::time::Duration;
 pub enum Action {
     FocusLeft,
     FocusRight,
+    MoveLeft,
+    MoveRight,
 }
 
 /// A generic binding ID used to distinguish which shortcut triggered the event.

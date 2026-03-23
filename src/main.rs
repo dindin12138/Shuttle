@@ -4,7 +4,7 @@ mod config;
 mod handlers;
 mod input;
 mod key_repeat;
-mod layout;
+// mod layout;
 mod protocol;
 mod state;
 
@@ -45,6 +45,8 @@ pub struct AppData {
     pub shuttle: state::Shuttle<ObjectId>,
     pub input_manager: input::InputManager<ObjectId>,
     pub repeat_manager: key_repeat::KeyRepeatManager<ObjectId>,
+
+    pub config: config::Config,
 
     /// A channel sender used to decouple the timer from the event loop's lifetime.
     pub timer_tx: Sender<TimerCommand>,
@@ -91,7 +93,6 @@ impl key_repeat::ExecuteAction for AppData {
 
         // Temporarily hardcoded to the primary display and 1080p resolution
         let output_id = 1;
-        let screen_width = 1920.0;
 
         // Use a match expression to determine if a layout update is needed
         let needs_layout = match action {
@@ -113,17 +114,30 @@ impl key_repeat::ExecuteAction for AppData {
                     .cycle_focus(1);
                 true
             }
+            key_repeat::Action::MoveLeft => {
+                self.shuttle
+                    .outputs
+                    .get_mut(&output_id)
+                    .unwrap()
+                    .current_workspace_mut()
+                    .move_focused_window(-1);
+                true
+            }
+            key_repeat::Action::MoveRight => {
+                self.shuttle
+                    .outputs
+                    .get_mut(&output_id)
+                    .unwrap()
+                    .current_workspace_mut()
+                    .move_focused_window(1);
+                true
+            }
         };
 
         // Drive the layout engine if the state has changed
         if needs_layout {
-            self.shuttle.update_layout(output_id, screen_width);
+            self.shuttle.update_layout(output_id, &self.config);
             self.request_manage();
-
-            // Mark the management state as dirty to trigger a new River configuration sequence
-            // if let Some(wm) = &self.window_manager {
-            //     wm.manage_dirty();
-            // }
         }
     }
 }
@@ -163,10 +177,13 @@ fn main() {
     let mut event_queue = conn.new_event_queue();
     let qh = event_queue.handle();
 
+    let user_config = config::Config::load();
+
     let mut app_data = AppData {
         shuttle: state::Shuttle::new(),
         input_manager: input::InputManager::new(),
         repeat_manager: key_repeat::KeyRepeatManager::new(),
+        config: user_config.clone(),
         timer_tx,
         loop_signal,
         wl_seat: None,
@@ -193,7 +210,7 @@ fn main() {
         || app_data.wl_seat.is_none()
     {
         eprintln!(
-            "❌ Fatal error: The current Wayland environment does not support the required River v0.4.0+ protocols!"
+            "Fatal error: The current Wayland environment does not support the required River v0.4.0+ protocols!"
         );
         eprintln!(
             "(This is expected behavior in the current NixOS stable branch. Code compiled successfully, exiting safely.)"
@@ -209,40 +226,16 @@ fn main() {
     let river_seat = match app_data.river_seat.as_ref() {
         Some(s) => s.clone(),
         None => {
-            eprintln!("❌ Fatal error: The River compositor did not emit a river_seat event!");
+            eprintln!("Fatal error: The River compositor did not emit a river_seat event!");
             exit(0);
         }
     };
 
-    println!("✅ Resources acquired successfully. Registering keybindings...");
+    println!("Resources acquired successfully. Registering keybindings...");
 
     // 1. Create a mock configuration
-    let dummy_config = config::Config {
-        bindings: vec![
-            config::KeybindConfig {
-                modifiers: vec!["Super".to_string()],
-                key: "a".to_string(),
-                action: config::Action::FocusLeft,
-            },
-            config::KeybindConfig {
-                modifiers: vec!["Super".to_string()],
-                key: "d".to_string(),
-                action: config::Action::FocusRight,
-            },
-            config::KeybindConfig {
-                modifiers: vec!["Super".to_string()],
-                key: "Enter".to_string(),
-                action: config::Action::SpawnTerminal,
-            },
-            config::KeybindConfig {
-                modifiers: vec!["Super".to_string()],
-                key: "q".to_string(),
-                action: config::Action::CloseWindow,
-            },
-        ],
-    };
 
-    let prepared = app_data.input_manager.prepare_bindings(&dummy_config);
+    let prepared = app_data.input_manager.prepare_bindings(&user_config);
     let xkb_manager = app_data.xkb_bindings_manager.as_ref().unwrap();
 
     // 2. Iterate and send requests to River
@@ -262,7 +255,7 @@ fn main() {
 
     // 3. Commit the Manage Sequence
     // app_data.window_manager.as_ref().unwrap().manage_finish();
-    println!("🎉 Keybindings registered successfully. Entering event loop...");
+    println!("Keybindings registered successfully. Entering event loop...");
 
     app_data.request_manage();
 

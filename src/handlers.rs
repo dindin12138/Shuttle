@@ -109,7 +109,6 @@ impl Dispatch<river_window_manager_v1::RiverWindowManagerV1, ()> for AppData {
                 workspace.insert_window(object_id, true);
 
                 // Mark management state as dirty to trigger a new manage sequence
-                // state.window_manager.as_ref().unwrap().manage_dirty();
                 state.request_manage();
             }
 
@@ -117,7 +116,7 @@ impl Dispatch<river_window_manager_v1::RiverWindowManagerV1, ()> for AppData {
             river_window_manager_v1::Event::ManageStart => {
                 state.river_state = crate::RiverState::Managing;
                 state.shuttle.cleanup_closed_windows();
-                state.shuttle.update_layout(1, 1920.0);
+                state.shuttle.update_layout(1, &state.config);
 
                 for binding in state.pending_bindings.drain(..) {
                     binding.enable();
@@ -150,7 +149,6 @@ impl Dispatch<river_window_manager_v1::RiverWindowManagerV1, ()> for AppData {
                 state.window_manager.as_ref().unwrap().manage_finish();
                 state.river_state = crate::RiverState::WaitingForRender;
             }
-
             // 3. Render Sequence: Apply physical coordinates to nodes
             river_window_manager_v1::Event::RenderStart => {
                 state.river_state = crate::RiverState::Rendering;
@@ -158,39 +156,54 @@ impl Dispatch<river_window_manager_v1::RiverWindowManagerV1, ()> for AppData {
                 let screen_width = 1920.0;
 
                 if let Some(output) = state.shuttle.outputs.get(&output_id) {
-                    if let Some(workspace) = output.workspaces.get(&output.active_workspace_id) {
-                        for id in &workspace.windows {
+                    let active_windows = output
+                        .workspaces
+                        .get(&output.active_workspace_id)
+                        .map(|ws| ws.windows.clone())
+                        .unwrap_or_default();
+
+                    for (id, node) in &state.node_proxies {
+                        if active_windows.contains(id) {
                             if let Some(window) = state.shuttle.window_db.get(id) {
                                 let win_x = window.screen_x;
                                 let win_w = window.width;
-                                let win_h = window.height; // 需要高来做裁剪
+                                let screen_width = state.config.output.width;
+                                let gap = state.config.layout.gaps;
 
-                                if let Some(node) = state.node_proxies.get(id) {
-                                    if win_x + win_w <= 0.0 || win_x >= screen_width {
-                                        node.set_position(-10000, -10000);
-                                    } else {
-                                        node.set_position(win_x as i32, 20);
-                                    }
+                                if win_x + win_w <= 0.0 || win_x >= screen_width {
+                                    node.set_position(-10000, -10000);
+                                } else {
+                                    node.set_position(win_x as i32, gap as i32);
+                                }
+                            }
+                        } else {
+                            node.set_position(-10000, -10000);
+                        }
+                    }
+
+                    for id in &active_windows {
+                        if let Some(window) = state.shuttle.window_db.get(id) {
+                            if let Some(proxy) = state.window_proxies.get(id) {
+                                let win_x = window.screen_x;
+                                let win_w = window.width;
+                                let win_h = window.height;
+
+                                let mut clip_x = 0;
+                                let mut clip_w = win_w as i32;
+
+                                if win_x < 0.0 {
+                                    clip_x = (-win_x) as i32;
+                                    clip_w = (win_w + win_x).max(0.0) as i32;
+                                } else if win_x + win_w > screen_width {
+                                    clip_w = (screen_width - win_x).max(0.0) as i32;
                                 }
 
-                                if let Some(proxy) = state.window_proxies.get(id) {
-                                    let mut clip_x = 0;
-                                    let mut clip_w = win_w as i32;
-
-                                    if win_x < 0.0 {
-                                        clip_x = (-win_x) as i32;
-                                        clip_w = (win_w + win_x).max(0.0) as i32; // 👈 增加 .max(0.0)
-                                    } else if win_x + win_w > screen_width {
-                                        clip_w = (screen_width - win_x).max(0.0) as i32; // 👈 增加 .max(0.0)
-                                    }
-
-                                    if clip_w > 0 && clip_w < win_w as i32 {
-                                        proxy.set_clip_box(clip_x, 0, clip_w, win_h as i32);
-                                        proxy.set_content_clip_box(clip_x, 0, clip_w, win_h as i32);
-                                    } else {
-                                        proxy.set_clip_box(0, 0, 0, 0);
-                                        proxy.set_content_clip_box(0, 0, 0, 0);
-                                    }
+                                if clip_w > 0 && clip_w < win_w as i32 {
+                                    proxy.set_clip_box(clip_x, 0, clip_w, win_h as i32);
+                                    proxy.set_content_clip_box(clip_x, 0, clip_w, win_h as i32);
+                                } else {
+                                    proxy.set_clip_box(0, 0, 0, 0);
+                                    proxy.set_content_clip_box(0, 0, 0, 0);
                                 }
                             }
                         }
@@ -224,7 +237,6 @@ impl Dispatch<river_window_v1::RiverWindowV1, ()> for AppData {
                     window.height = height as f32;
                 }
                 // Recalculate layout upon dimension changes
-                // state.shuttle.update_layout(1, 1920.0);
                 state.request_manage();
             }
 
@@ -242,7 +254,6 @@ impl Dispatch<river_window_v1::RiverWindowV1, ()> for AppData {
                 state.window_proxies.remove(&object_id);
                 proxy.destroy();
 
-                // state.window_manager.as_ref().unwrap().manage_dirty();
                 state.request_manage();
             }
             _ => {}
@@ -265,21 +276,16 @@ impl Dispatch<river_xkb_binding_v1::RiverXkbBindingV1, ()> for AppData {
             river_xkb_binding_v1::Event::Pressed => {
                 if let Some(action) = state.input_manager.handle_pressed(object_id.clone()) {
                     match action {
-                        config::Action::FocusLeft | config::Action::FocusRight => {
-                            let repeat_action = if action == config::Action::FocusLeft {
-                                key_repeat::Action::FocusLeft
-                            } else {
-                                key_repeat::Action::FocusRight
-                            };
-                            use key_repeat::ExecuteAction;
-                            state.execute_action(repeat_action.clone());
-                            let _ = state
-                                .timer_tx
-                                .send(TimerCommand::StartRepeat(object_id, repeat_action));
-                        }
-
-                        config::Action::SpawnTerminal => {
-                            std::process::Command::new("ghostty").spawn().ok();
+                        config::Action::Spawn { args } => {
+                            if !args.is_empty() {
+                                let mut command = std::process::Command::new(&args[0]);
+                                if args.len() > 1 {
+                                    command.args(&args[1..]);
+                                }
+                                if let Err(e) = command.spawn() {
+                                    eprintln!("Failed to spawn {:?}: {}", args, e);
+                                }
+                            }
                         }
 
                         config::Action::CloseWindow => {
@@ -294,7 +300,49 @@ impl Dispatch<river_xkb_binding_v1::RiverXkbBindingV1, ()> for AppData {
                                 }
                             }
                         }
-                        _ => {}
+
+                        config::Action::FocusLeft
+                        | config::Action::FocusRight
+                        | config::Action::MoveLeft
+                        | config::Action::MoveRight => {
+                            let repeat_action = match action {
+                                config::Action::FocusLeft => key_repeat::Action::FocusLeft,
+                                config::Action::FocusRight => key_repeat::Action::FocusRight,
+                                config::Action::MoveLeft => key_repeat::Action::MoveLeft,
+                                config::Action::MoveRight => key_repeat::Action::MoveRight,
+                                _ => unreachable!(),
+                            };
+
+                            use key_repeat::ExecuteAction;
+                            state.execute_action(repeat_action.clone());
+                            let _ = state
+                                .timer_tx
+                                .send(TimerCommand::StartRepeat(object_id, repeat_action));
+                        }
+
+                        config::Action::FocusWorkspace { target } => {
+                            if let Some(output) = state.shuttle.outputs.get_mut(&1) {
+                                output.switch_workspace(target);
+                                state.request_manage();
+                            }
+                        }
+
+                        config::Action::MoveToWorkspace { target } => {
+                            if let Some(output) = state.shuttle.outputs.get_mut(&1) {
+                                output.move_focused_to_workspace(target);
+                                output.switch_workspace(target);
+                                state.request_manage();
+                            }
+                        }
+
+                        config::Action::Quit => {
+                            println!("Initiating graceful shutdown...");
+                            std::process::Command::new("riverctl")
+                                .arg("exit")
+                                .spawn()
+                                .ok();
+                            state.loop_signal.stop();
+                        }
                     }
                 }
             }

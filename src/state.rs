@@ -5,7 +5,7 @@ use std::fmt::Debug;
 use std::hash::Hash;
 use tracing::{info, warn};
 
-use crate::layout::FocusCenteringMode;
+use crate::config::FocusCenteringMode;
 
 /// A generic identifier for a window.
 /// In a production environment, this maps to `wayland_client::backend::ObjectId`.
@@ -186,6 +186,21 @@ impl<ID: WindowId> Workspace<ID> {
         let new_focus_id = self.windows[new_idx as usize].clone();
         self.focus_window(new_focus_id);
     }
+
+    pub fn move_focused_window(&mut self, direction: i32) {
+        let focused_id = match self.focused_window() {
+            Some(id) => id,
+            None => return,
+        };
+
+        let current_idx = self.windows.iter().position(|w| w == &focused_id).unwrap();
+        let new_idx = current_idx as i32 + direction;
+
+        if new_idx >= 0 && (new_idx as usize) < self.windows.len() {
+            self.windows.swap(current_idx, new_idx as usize);
+            tracing::info!("Moved window {:?} to index {}", focused_id, new_idx);
+        }
+    }
 }
 
 /// Output (Monitor / Screen).
@@ -219,6 +234,36 @@ impl<ID: WindowId> Output<ID> {
         self.workspaces
             .entry(self.active_workspace_id)
             .or_insert_with(Workspace::new)
+    }
+
+    pub fn switch_workspace(&mut self, target: u32) {
+        self.active_workspace_id = target;
+        self.workspaces
+            .entry(target)
+            .or_insert_with(|| Workspace::new());
+    }
+
+    pub fn move_focused_to_workspace(&mut self, target: u32) {
+        if self.active_workspace_id == target {
+            return;
+        }
+
+        let focused_id = self
+            .workspaces
+            .get(&self.active_workspace_id)
+            .and_then(|ws| ws.focused_window());
+
+        if let Some(id) = focused_id {
+            if let Some(ws) = self.workspaces.get_mut(&self.active_workspace_id) {
+                ws.windows.retain(|x| x != &id);
+                ws.focus_stack.retain(|x| x != &id);
+            }
+            let target_ws = self
+                .workspaces
+                .entry(target)
+                .or_insert_with(|| Workspace::new());
+            target_ws.insert_window(id, true);
+        }
     }
 }
 
@@ -271,14 +316,67 @@ impl<ID: WindowId> Shuttle<ID> {
 
     /// Core layout trigger.
     /// Delegates the infinite scrolling layout calculations to the layout engine.
-    pub fn update_layout(&mut self, output_id: u32, screen_width: f32) {
-        let output = match self.outputs.get_mut(&output_id) {
-            Some(o) => o,
-            None => return,
-        };
-        let workspace = output.current_workspace_mut();
+    pub fn update_layout(&mut self, output_id: u32, config: &crate::config::Config) {
+        let gap = config.layout.gaps;
+        let screen_width = config.output.width;
+        let screen_height = config.output.height;
+        let column_width = config.layout.default_column_width;
 
-        crate::layout::recalculate(workspace, &mut self.window_db, screen_width);
+        if let Some(output) = self.outputs.get_mut(&output_id) {
+            if let Some(workspace) = output.workspaces.get_mut(&output.active_workspace_id) {
+                let mut current_x = gap;
+
+                for id in &workspace.windows {
+                    if let Some(window) = self.window_db.get_mut(id) {
+                        window.width = column_width;
+                        window.height = screen_height - (gap * 2.0);
+                        window.world_x = current_x;
+
+                        current_x += window.width + gap;
+                    }
+                }
+
+                if let Some(focused_id) = workspace.focused_window() {
+                    if let Some(window) = self.window_db.get(&focused_id) {
+                        let center_mode = config.layout.center_focused_column;
+                        let available_width = screen_width - (gap * 2.0);
+
+                        match center_mode {
+                            crate::config::FocusCenteringMode::Always => {
+                                workspace.camera_x =
+                                    window.world_x + (window.width / 2.0) - (screen_width / 2.0);
+                            }
+                            crate::config::FocusCenteringMode::Never => {
+                                if window.world_x < workspace.camera_x + gap {
+                                    workspace.camera_x = window.world_x - gap;
+                                } else if window.world_x + window.width
+                                    > workspace.camera_x + screen_width - gap
+                                {
+                                    workspace.camera_x =
+                                        window.world_x + window.width - screen_width + gap;
+                                }
+                            }
+                            crate::config::FocusCenteringMode::OnOverflow => {
+                                let is_fully_visible = window.world_x >= workspace.camera_x + gap
+                                    && (window.world_x + window.width)
+                                        <= (workspace.camera_x + screen_width - gap);
+
+                                if window.width > available_width || !is_fully_visible {
+                                    workspace.camera_x = window.world_x + (window.width / 2.0)
+                                        - (screen_width / 2.0);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                for id in &workspace.windows {
+                    if let Some(window) = self.window_db.get_mut(id) {
+                        window.screen_x = window.world_x - workspace.camera_x;
+                    }
+                }
+            }
+        }
     }
 }
 
