@@ -28,6 +28,16 @@ pub enum TimerCommand {
     StopRepeat(Option<ObjectId>),
 }
 
+#[derive(Debug, PartialEq, Default)]
+pub enum RiverState {
+    #[default]
+    Idle,
+    ManageRequested,
+    Managing,
+    WaitingForRender,
+    Rendering,
+}
+
 /// The global application state (The God Object).
 ///
 /// Holds the window manager state, input managers, and Wayland proxies.
@@ -48,6 +58,31 @@ pub struct AppData {
     /// Proxies for communicating with physical window entities.
     pub window_proxies: std::collections::HashMap<ObjectId, river_window_v1::RiverWindowV1>,
     pub node_proxies: std::collections::HashMap<ObjectId, river_node_v1::RiverNodeV1>,
+
+    pub pending_bindings:
+        Vec<crate::protocol::river_xkb_bindings::river_xkb_binding_v1::RiverXkbBindingV1>,
+    pub active_bindings:
+        Vec<crate::protocol::river_xkb_bindings::river_xkb_binding_v1::RiverXkbBindingV1>,
+
+    pub river_state: RiverState,
+    pub needs_manage: bool,
+}
+
+impl AppData {
+    pub fn request_manage(&mut self) {
+        self.needs_manage = true;
+        self.try_send_manage_dirty();
+    }
+
+    pub fn try_send_manage_dirty(&mut self) {
+        if self.needs_manage && self.river_state == RiverState::Idle {
+            if let Some(wm) = &self.window_manager {
+                wm.manage_dirty();
+                self.river_state = RiverState::ManageRequested;
+                self.needs_manage = false;
+            }
+        }
+    }
 }
 
 impl key_repeat::ExecuteAction for AppData {
@@ -83,11 +118,12 @@ impl key_repeat::ExecuteAction for AppData {
         // Drive the layout engine if the state has changed
         if needs_layout {
             self.shuttle.update_layout(output_id, screen_width);
+            self.request_manage();
 
             // Mark the management state as dirty to trigger a new River configuration sequence
-            if let Some(wm) = &self.window_manager {
-                wm.manage_dirty();
-            }
+            // if let Some(wm) = &self.window_manager {
+            //     wm.manage_dirty();
+            // }
         }
     }
 }
@@ -139,6 +175,10 @@ fn main() {
         river_seat: None,
         window_proxies: std::collections::HashMap::new(),
         node_proxies: std::collections::HashMap::new(),
+        pending_bindings: Vec::new(),
+        active_bindings: Vec::new(),
+        river_state: RiverState::Idle,
+        needs_manage: false,
     };
 
     let _registry = display.get_registry(&qh, ());
@@ -181,13 +221,23 @@ fn main() {
         bindings: vec![
             config::KeybindConfig {
                 modifiers: vec!["Super".to_string()],
-                key: "h".to_string(),
+                key: "a".to_string(),
                 action: config::Action::FocusLeft,
             },
             config::KeybindConfig {
                 modifiers: vec!["Super".to_string()],
-                key: "l".to_string(),
+                key: "d".to_string(),
                 action: config::Action::FocusRight,
+            },
+            config::KeybindConfig {
+                modifiers: vec!["Super".to_string()],
+                key: "Enter".to_string(),
+                action: config::Action::SpawnTerminal,
+            },
+            config::KeybindConfig {
+                modifiers: vec!["Super".to_string()],
+                key: "q".to_string(),
+                action: config::Action::CloseWindow,
             },
         ],
     };
@@ -202,7 +252,8 @@ fn main() {
         // Register the binding using the appropriate river_seat
         let binding_proxy = xkb_manager.get_xkb_binding(&river_seat, keysym, modifiers, &qh, ());
 
-        binding_proxy.enable();
+        // binding_proxy.enable();
+        app_data.pending_bindings.push(binding_proxy.clone());
 
         app_data
             .input_manager
@@ -210,8 +261,10 @@ fn main() {
     }
 
     // 3. Commit the Manage Sequence
-    app_data.window_manager.as_ref().unwrap().manage_finish();
+    // app_data.window_manager.as_ref().unwrap().manage_finish();
     println!("🎉 Keybindings registered successfully. Entering event loop...");
+
+    app_data.request_manage();
 
     // Hook into the calloop event loop
     let wayland_source = WaylandSource::new(conn, event_queue);

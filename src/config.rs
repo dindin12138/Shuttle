@@ -12,6 +12,7 @@ pub enum Action {
     MoveRight,
     CloseWindow,
     Quit,
+    SpawnTerminal,
 }
 
 /// A single keybinding configuration parsed from the TOML file.

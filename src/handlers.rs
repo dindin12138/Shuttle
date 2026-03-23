@@ -7,7 +7,7 @@ use wayland_client::protocol::{wl_registry, wl_seat};
 use wayland_client::{Connection, Dispatch, Proxy, QueueHandle};
 
 use crate::protocol::river_window_manager::{
-    river_node_v1, river_seat_v1, river_window_manager_v1, river_window_v1,
+    river_node_v1, river_output_v1, river_seat_v1, river_window_manager_v1, river_window_v1,
 };
 use crate::protocol::river_xkb_bindings::{river_xkb_binding_v1, river_xkb_bindings_v1};
 
@@ -55,6 +55,21 @@ impl Dispatch<wl_registry::WlRegistry, ()> for AppData {
 }
 
 impl Dispatch<river_window_manager_v1::RiverWindowManagerV1, ()> for AppData {
+    fn event_created_child(
+        opcode: u16,
+        qh: &QueueHandle<Self>,
+    ) -> std::sync::Arc<dyn wayland_client::backend::ObjectData> {
+        match opcode {
+            6 => qh.make_data::<river_window_v1::RiverWindowV1, ()>(()),
+            7 => qh.make_data::<river_output_v1::RiverOutputV1, ()>(()),
+            8 => qh.make_data::<river_seat_v1::RiverSeatV1, ()>(()),
+            _ => panic!(
+                "Unexpected event_created_child opcode {} from RiverWindowManager",
+                opcode
+            ),
+        }
+    }
+
     fn event(
         state: &mut Self,
         _: &river_window_manager_v1::RiverWindowManagerV1,
@@ -94,16 +109,31 @@ impl Dispatch<river_window_manager_v1::RiverWindowManagerV1, ()> for AppData {
                 workspace.insert_window(object_id, true);
 
                 // Mark management state as dirty to trigger a new manage sequence
-                state.window_manager.as_ref().unwrap().manage_dirty();
+                // state.window_manager.as_ref().unwrap().manage_dirty();
+                state.request_manage();
             }
 
             // 2. Manage Sequence: Propose logical properties (e.g., dimensions)
             river_window_manager_v1::Event::ManageStart => {
+                state.river_state = crate::RiverState::Managing;
                 state.shuttle.cleanup_closed_windows();
+                state.shuttle.update_layout(1, 1920.0);
+
+                for binding in state.pending_bindings.drain(..) {
+                    binding.enable();
+                    state.active_bindings.push(binding);
+                }
 
                 let output_id = 1;
                 if let Some(output) = state.shuttle.outputs.get(&output_id) {
                     if let Some(workspace) = output.workspaces.get(&output.active_workspace_id) {
+                        if let Some(focused_id) = workspace.focused_window() {
+                            if let Some(window_proxy) = state.window_proxies.get(&focused_id) {
+                                if let Some(seat) = &state.river_seat {
+                                    seat.focus_window(window_proxy);
+                                }
+                            }
+                        }
                         for id in &workspace.windows {
                             if let Some(window) = state.shuttle.window_db.get(id) {
                                 if let Some(proxy) = state.window_proxies.get(id) {
@@ -117,14 +147,15 @@ impl Dispatch<river_window_manager_v1::RiverWindowManagerV1, ()> for AppData {
                     }
                 }
 
-                // Commit the manage sequence
                 state.window_manager.as_ref().unwrap().manage_finish();
+                state.river_state = crate::RiverState::WaitingForRender;
             }
 
             // 3. Render Sequence: Apply physical coordinates to nodes
             river_window_manager_v1::Event::RenderStart => {
+                state.river_state = crate::RiverState::Rendering;
                 let output_id = 1;
-                let screen_width = 1920.0; // Assuming a 1080p screen width
+                let screen_width = 1920.0;
 
                 if let Some(output) = state.shuttle.outputs.get(&output_id) {
                     if let Some(workspace) = output.workspaces.get(&output.active_workspace_id) {
@@ -132,46 +163,31 @@ impl Dispatch<river_window_manager_v1::RiverWindowManagerV1, ()> for AppData {
                             if let Some(window) = state.shuttle.window_db.get(id) {
                                 let win_x = window.screen_x;
                                 let win_w = window.width;
-                                let win_h = window.height;
+                                let win_h = window.height; // 需要高来做裁剪
 
-                                // High-Performance Culling
-                                // If the window is completely off-screen (left or right bounds)
-                                if win_x + win_w <= 0.0 || win_x >= screen_width {
-                                    if let Some(node) = state.node_proxies.get(id) {
-                                        // Dispatch to an extreme off-screen coordinate to ensure the GPU skips rendering
-                                        node.set_position(-10000, -10000);
-                                    }
-                                    // Crucial: continue immediately to bypass further protocol requests and save IPC overhead
-                                    continue;
-                                }
-                                // Standard Rendering: Set Position
                                 if let Some(node) = state.node_proxies.get(id) {
-                                    // Y coordinate is fixed at 20 to leave a top margin
-                                    node.set_position(win_x as i32, 20);
+                                    if win_x + win_w <= 0.0 || win_x >= screen_width {
+                                        node.set_position(-10000, -10000);
+                                    } else {
+                                        node.set_position(win_x as i32, 20);
+                                    }
                                 }
-                                // Visual Perfection: Edge Clipping
+
                                 if let Some(proxy) = state.window_proxies.get(id) {
                                     let mut clip_x = 0;
                                     let mut clip_w = win_w as i32;
 
                                     if win_x < 0.0 {
-                                        // Window is clipped on the left edge
                                         clip_x = (-win_x) as i32;
-                                        clip_w = (win_w + win_x) as i32;
+                                        clip_w = (win_w + win_x).max(0.0) as i32; // 👈 增加 .max(0.0)
                                     } else if win_x + win_w > screen_width {
-                                        // Window is clipped on the right edge
-                                        clip_w = (screen_width - win_x) as i32;
+                                        clip_w = (screen_width - win_x).max(0.0) as i32; // 👈 增加 .max(0.0)
                                     }
 
-                                    // Check if clipping is actually required
-                                    if clip_w < win_w as i32 {
-                                        // Enable clipping: clips both window content and decorations (shadows/borders)
-                                        // to prevent visual bleeding into adjacent monitors.
+                                    if clip_w > 0 && clip_w < win_w as i32 {
                                         proxy.set_clip_box(clip_x, 0, clip_w, win_h as i32);
                                         proxy.set_content_clip_box(clip_x, 0, clip_w, win_h as i32);
                                     } else {
-                                        // Window is fully visible on screen.
-                                        // Per River protocol: Setting a clip box with 0 width/height disables clipping.
                                         proxy.set_clip_box(0, 0, 0, 0);
                                         proxy.set_content_clip_box(0, 0, 0, 0);
                                     }
@@ -180,8 +196,10 @@ impl Dispatch<river_window_manager_v1::RiverWindowManagerV1, ()> for AppData {
                         }
                     }
                 }
-                // Commit the render sequence to apply changes to the screen
+
                 state.window_manager.as_ref().unwrap().render_finish();
+                state.river_state = crate::RiverState::Idle;
+                state.try_send_manage_dirty();
             }
             _ => {}
         }
@@ -206,7 +224,8 @@ impl Dispatch<river_window_v1::RiverWindowV1, ()> for AppData {
                     window.height = height as f32;
                 }
                 // Recalculate layout upon dimension changes
-                state.shuttle.update_layout(1, 1920.0);
+                // state.shuttle.update_layout(1, 1920.0);
+                state.request_manage();
             }
 
             // Gracefully handle window destruction
@@ -223,7 +242,8 @@ impl Dispatch<river_window_v1::RiverWindowV1, ()> for AppData {
                 state.window_proxies.remove(&object_id);
                 proxy.destroy();
 
-                state.window_manager.as_ref().unwrap().manage_dirty();
+                // state.window_manager.as_ref().unwrap().manage_dirty();
+                state.request_manage();
             }
             _ => {}
         }
@@ -244,19 +264,38 @@ impl Dispatch<river_xkb_binding_v1::RiverXkbBindingV1, ()> for AppData {
         match event {
             river_xkb_binding_v1::Event::Pressed => {
                 if let Some(action) = state.input_manager.handle_pressed(object_id.clone()) {
-                    let repeat_action = match action {
-                        config::Action::FocusLeft => key_repeat::Action::FocusLeft,
-                        config::Action::FocusRight => key_repeat::Action::FocusRight,
-                        _ => return,
-                    };
+                    match action {
+                        config::Action::FocusLeft | config::Action::FocusRight => {
+                            let repeat_action = if action == config::Action::FocusLeft {
+                                key_repeat::Action::FocusLeft
+                            } else {
+                                key_repeat::Action::FocusRight
+                            };
+                            use key_repeat::ExecuteAction;
+                            state.execute_action(repeat_action.clone());
+                            let _ = state
+                                .timer_tx
+                                .send(TimerCommand::StartRepeat(object_id, repeat_action));
+                        }
 
-                    use key_repeat::ExecuteAction;
-                    state.execute_action(repeat_action.clone());
+                        config::Action::SpawnTerminal => {
+                            std::process::Command::new("ghostty").spawn().ok();
+                        }
 
-                    // Send a timer command through the channel to handle key repeat asynchronously
-                    let _ = state
-                        .timer_tx
-                        .send(TimerCommand::StartRepeat(object_id, repeat_action));
+                        config::Action::CloseWindow => {
+                            if let Some(output) = state.shuttle.outputs.get(&1) {
+                                if let Some(ws) = output.workspaces.get(&output.active_workspace_id)
+                                {
+                                    if let Some(focused) = ws.focused_window() {
+                                        if let Some(proxy) = state.window_proxies.get(&focused) {
+                                            proxy.close();
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
                 }
             }
             river_xkb_binding_v1::Event::Released => {
@@ -314,6 +353,18 @@ impl Dispatch<river_seat_v1::RiverSeatV1, ()> for AppData {
         _: &mut Self,
         _: &river_seat_v1::RiverSeatV1,
         _: river_seat_v1::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<AppData>,
+    ) {
+    }
+}
+
+impl Dispatch<river_output_v1::RiverOutputV1, ()> for AppData {
+    fn event(
+        _: &mut Self,
+        _: &river_output_v1::RiverOutputV1,
+        _: river_output_v1::Event,
         _: &(),
         _: &Connection,
         _: &QueueHandle<AppData>,
