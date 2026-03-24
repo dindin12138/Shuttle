@@ -2,7 +2,8 @@
 
 use crate::config::Config;
 use crate::protocol::river_window_manager::{
-    river_node_v1::RiverNodeV1, river_window_v1::RiverWindowV1,
+    river_node_v1::RiverNodeV1,
+    river_window_v1::{self, RiverWindowV1},
 };
 use crate::state::Shuttle;
 use std::collections::HashMap;
@@ -21,6 +22,11 @@ pub fn apply_viewport_clipping(
             .get(&output.active_workspace_id)
             .map(|ws| ws.windows.clone())
             .unwrap_or_default();
+
+        let focused_id = output
+            .workspaces
+            .get(&output.active_workspace_id)
+            .and_then(|ws| ws.focused_window());
 
         let screen_width = config.output.width;
         let gap = config.layout.gaps;
@@ -52,26 +58,73 @@ pub fn apply_viewport_clipping(
                     let win_x = window.screen_x;
                     let win_w = window.width;
 
-                    let mut clip_x = 0;
-                    let mut clip_w = win_w as i32;
+                    let is_focused = Some(id.clone()) == focused_id;
+                    let (b_width, (r, g, b, a)) = if config.layout.focus_ring.enable {
+                        if is_focused {
+                            (
+                                config.layout.focus_ring.width as i32,
+                                config.layout.focus_ring.get_active_color_u32(),
+                            )
+                        } else {
+                            (
+                                config.layout.focus_ring.width as i32,
+                                config.layout.focus_ring.get_inactive_color_u32(),
+                            )
+                        }
+                    } else {
+                        (0, (0, 0, 0, 0))
+                    };
+
+                    proxy.set_borders(river_window_v1::Edges::all(), b_width, r, g, b, a);
+
+                    let mut content_clip_x = 0;
+                    let mut content_clip_w = win_w as i32;
 
                     if win_x < viewport_left {
                         let overlap = viewport_left - win_x;
-                        clip_x = overlap as i32;
-                        clip_w = (win_w - overlap).max(0.0) as i32;
+                        content_clip_x = overlap as i32;
+                        content_clip_w = (win_w - overlap).max(0.0) as i32;
+                    }
+                    if win_x + win_w > viewport_right {
+                        let overflow = (win_x + win_w) - viewport_right;
+                        content_clip_w =
+                            (win_w - (content_clip_x as f32) - overflow).max(0.0) as i32;
+                    }
+
+                    let mut outer_clip_x = -b_width;
+                    let outer_clip_y = -b_width;
+                    let mut outer_clip_w = win_w as i32 + (b_width * 2);
+                    let outer_clip_h = target_h + (b_width * 2);
+
+                    if win_x < viewport_left {
+                        let overlap = viewport_left - win_x;
+                        let cut = overlap - outer_clip_x as f32;
+                        if cut > 0.0 {
+                            outer_clip_x += cut as i32;
+                            outer_clip_w -= cut as i32;
+                        }
                     }
 
                     if win_x + win_w > viewport_right {
-                        let overflow = (win_x + win_w) - viewport_right;
-                        clip_w = (win_w - (clip_x as f32) - overflow).max(0.0) as i32;
+                        let right_edge = viewport_right - win_x;
+                        let current_right = outer_clip_x as f32 + outer_clip_w as f32;
+                        let cut = current_right - right_edge;
+                        if cut > 0.0 {
+                            outer_clip_w -= cut as i32;
+                        }
                     }
 
-                    if clip_w > 0 {
-                        proxy.set_clip_box(clip_x, 0, clip_w, target_h);
-                        proxy.set_content_clip_box(clip_x, 0, clip_w, target_h);
+                    if content_clip_w > 0 {
+                        proxy.set_content_clip_box(content_clip_x, 0, content_clip_w, target_h);
+                        proxy.set_clip_box(
+                            outer_clip_x,
+                            outer_clip_y,
+                            outer_clip_w.max(0),
+                            outer_clip_h.max(0),
+                        );
                     } else {
-                        proxy.set_clip_box(0, 0, 0, 0);
                         proxy.set_content_clip_box(0, 0, 0, 0);
+                        proxy.set_clip_box(0, 0, 0, 0);
                     }
                 }
             }

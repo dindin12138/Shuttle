@@ -17,8 +17,8 @@ pub fn update_layout<ID: WindowId>(shuttle: &mut Shuttle<ID>, output_id: u32, co
             for id in &workspace.windows {
                 if let Some(window) = shuttle.window_db.get_mut(id) {
                     let prop = window.custom_proportion.unwrap_or(default_prop);
-
-                    window.width = available_width * prop;
+                    let calculated_width = (prop * (available_width + gap)) - gap;
+                    window.width = calculated_width.max(1.0);
                     window.height = screen_height - (gap * 2.0);
                     window.world_x = current_x;
                     current_x += window.width + gap;
@@ -50,9 +50,18 @@ pub fn update_layout<ID: WindowId>(shuttle: &mut Shuttle<ID>, output_id: u32, co
                                 && (window.world_x + window.width)
                                     <= (workspace.camera_x + screen_width - gap);
 
-                            if window.width > available_width || !is_fully_visible {
+                            if window.width > available_width {
                                 workspace.camera_x =
                                     window.world_x + (window.width / 2.0) - (screen_width / 2.0);
+                            } else if !is_fully_visible {
+                                if window.world_x < workspace.camera_x + gap {
+                                    workspace.camera_x = window.world_x - gap;
+                                } else if window.world_x + window.width
+                                    > workspace.camera_x + screen_width - gap
+                                {
+                                    workspace.camera_x =
+                                        window.world_x + window.width - screen_width + gap;
+                                }
                             }
                         }
                     }

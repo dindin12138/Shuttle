@@ -48,6 +48,7 @@ pub enum Action {
 }
 
 #[derive(Debug, Deserialize, Clone)]
+#[serde(rename_all = "kebab-case")]
 pub struct LayoutConfig {
     pub gaps: f32,
 
@@ -59,13 +60,15 @@ pub struct LayoutConfig {
 
     #[serde(default)]
     pub center_focused_column: FocusCenteringMode,
+
+    #[serde(rename = "focus-ring", default)]
+    pub focus_ring: FocusRingConfig,
 }
 
 fn default_presets() -> Vec<Proportion> {
     vec![
-        Proportion { proportion: 0.333 },
-        Proportion { proportion: 0.5 },
-        Proportion { proportion: 0.667 },
+        Proportion { proportion: 0.45 },
+        Proportion { proportion: 0.55 },
     ]
 }
 
@@ -76,6 +79,7 @@ impl Default for LayoutConfig {
             default_column_width: Proportion::default(),
             preset_column_widths: default_presets(),
             center_focused_column: FocusCenteringMode::Never,
+            focus_ring: FocusRingConfig::default(),
         }
     }
 }
@@ -93,6 +97,72 @@ impl Default for OutputConfig {
             height: 1200.0,
         }
     }
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct ColorConfig {
+    pub color: String,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+#[serde(rename_all = "kebab-case")]
+pub struct FocusRingConfig {
+    pub enable: bool,
+    pub width: u32,
+    pub active: ColorConfig,
+    pub inactive: ColorConfig,
+}
+
+impl Default for FocusRingConfig {
+    fn default() -> Self {
+        Self {
+            enable: false,
+            width: 2,
+            active: ColorConfig {
+                color: "#81a1c1".to_string(),
+            },
+            inactive: ColorConfig {
+                color: "#2e3440".to_string(),
+            },
+        }
+    }
+}
+
+impl FocusRingConfig {
+    pub fn get_active_color_u32(&self) -> (u32, u32, u32, u32) {
+        parse_color_to_u32(&self.active.color)
+    }
+
+    pub fn get_inactive_color_u32(&self) -> (u32, u32, u32, u32) {
+        parse_color_to_u32(&self.inactive.color)
+    }
+}
+
+fn parse_color_to_u32(hex: &str) -> (u32, u32, u32, u32) {
+    let hex = hex.trim_start_matches('#');
+    let (r, g, b, a) = match hex.len() {
+        6 => {
+            let r = u8::from_str_radix(&hex[0..2], 16).unwrap_or(255);
+            let g = u8::from_str_radix(&hex[2..4], 16).unwrap_or(255);
+            let b = u8::from_str_radix(&hex[4..6], 16).unwrap_or(255);
+            (r, g, b, 255)
+        }
+        8 => {
+            let r = u8::from_str_radix(&hex[0..2], 16).unwrap_or(255);
+            let g = u8::from_str_radix(&hex[2..4], 16).unwrap_or(255);
+            let b = u8::from_str_radix(&hex[4..6], 16).unwrap_or(255);
+            let a = u8::from_str_radix(&hex[6..8], 16).unwrap_or(255);
+            (r, g, b, a)
+        }
+        _ => (255, 255, 255, 255),
+    };
+
+    (
+        (r as u32) * 0x01010101,
+        (g as u32) * 0x01010101,
+        (b as u32) * 0x01010101,
+        (a as u32) * 0x01010101,
+    )
 }
 
 #[derive(Debug, Deserialize, Clone)]

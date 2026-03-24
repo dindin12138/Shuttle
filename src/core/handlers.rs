@@ -95,7 +95,9 @@ impl Dispatch<river_window_manager_v1::RiverWindowManagerV1, ()> for AppData {
                 let available_width = screen_width - (gap * 2.0);
 
                 let default_prop = state.config.layout.default_column_width.proportion;
-                let initial_width = available_width * default_prop;
+
+                let initial_width = (default_prop * (available_width + gap)) - gap;
+                let initial_width = initial_width.max(1.0);
                 let target_h = state.config.output.height - (gap * 2.0);
 
                 let new_window = state::Window::new(object_id.clone(), initial_width, target_h);
