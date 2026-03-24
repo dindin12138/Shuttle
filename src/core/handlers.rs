@@ -3,6 +3,7 @@
 use crate::core::action;
 use crate::state;
 use crate::state::{AppData, TimerCommand};
+use tracing::{debug, error, info, trace};
 
 use wayland_client::protocol::{wl_registry, wl_seat};
 use wayland_client::{Connection, Dispatch, Proxy, QueueHandle};
@@ -27,9 +28,11 @@ impl Dispatch<wl_registry::WlRegistry, ()> for AppData {
         {
             match interface.as_str() {
                 "wl_seat" => {
+                    info!("Bound Wayland global: wl_seat");
                     state.wl_seat = Some(registry.bind::<wl_seat::WlSeat, _, _>(name, 1, qh, ()));
                 }
                 "river_window_manager_v1" => {
+                    info!("Bound River protocol: river_window_manager_v1");
                     state.window_manager = Some(
                         registry.bind::<river_window_manager_v1::RiverWindowManagerV1, _, _>(
                             name,
@@ -40,6 +43,7 @@ impl Dispatch<wl_registry::WlRegistry, ()> for AppData {
                     );
                 }
                 "river_xkb_bindings_v1" => {
+                    info!("Bound River protocol: river_xkb_bindings_v1");
                     state.xkb_bindings_manager = Some(
                         registry.bind::<river_xkb_bindings_v1::RiverXkbBindingsV1, _, _>(
                             name,
@@ -64,10 +68,13 @@ impl Dispatch<river_window_manager_v1::RiverWindowManagerV1, ()> for AppData {
             6 => qh.make_data::<river_window_v1::RiverWindowV1, ()>(()),
             7 => qh.make_data::<river_output_v1::RiverOutputV1, ()>(()),
             8 => qh.make_data::<river_seat_v1::RiverSeatV1, ()>(()),
-            _ => panic!(
-                "Unexpected event_created_child opcode {} from RiverWindowManager",
-                opcode
-            ),
+            _ => {
+                error!(
+                    "Unexpected event_created_child opcode {} from RiverWindowManager",
+                    opcode
+                );
+                panic!("Unexpected event_created_child opcode");
+            }
         }
     }
 
@@ -81,12 +88,14 @@ impl Dispatch<river_window_manager_v1::RiverWindowManagerV1, ()> for AppData {
     ) {
         match event {
             river_window_manager_v1::Event::Seat { id } => {
+                debug!("Received River Seat: {:?}", id.id());
                 state.river_seat = Some(id);
             }
 
             // 1. New window creation
             river_window_manager_v1::Event::Window { id } => {
                 let object_id = id.id();
+                info!("New window detected: {:?}", object_id);
 
                 // Initialize the window with temporary dimensions.
                 // Actual dimensions will be provided via the Dimensions event.
@@ -126,6 +135,8 @@ impl Dispatch<river_window_manager_v1::RiverWindowManagerV1, ()> for AppData {
 
             // 2. Manage Sequence: Propose logical properties (e.g., dimensions)
             river_window_manager_v1::Event::ManageStart => {
+                trace!("ManageStart sequence initiated");
+
                 state.river_state = crate::RiverState::Managing;
                 state.shuttle.cleanup_closed_windows();
                 crate::layout::engine::update_layout(&mut state.shuttle, 1, &state.config);
@@ -163,6 +174,8 @@ impl Dispatch<river_window_manager_v1::RiverWindowManagerV1, ()> for AppData {
             }
             // 3. Render Sequence: Apply physical coordinates to nodes
             river_window_manager_v1::Event::RenderStart => {
+                trace!("RenderStart sequence initiated");
+
                 state.river_state = crate::RiverState::Rendering;
 
                 crate::layout::clip::apply_viewport_clipping(
@@ -195,6 +208,11 @@ impl Dispatch<river_window_v1::RiverWindowV1, ()> for AppData {
             // Listen for actual dimensions requested by the client application
             river_window_v1::Event::Dimensions { width, height } => {
                 let object_id = proxy.id();
+                trace!(
+                    "Window {:?} dimension update: {}x{}",
+                    object_id, width, height
+                );
+
                 if let Some(window) = state.shuttle.window_db.get_mut(&object_id) {
                     window.width = width as f32;
                     window.height = height as f32;
@@ -206,6 +224,8 @@ impl Dispatch<river_window_v1::RiverWindowV1, ()> for AppData {
             // Gracefully handle window destruction
             river_window_v1::Event::Closed => {
                 let object_id = proxy.id();
+                info!("Window closed by client: {:?}", object_id);
+
                 if let Some(window) = state.shuttle.window_db.get_mut(&object_id) {
                     window.is_closed = true;
                 }
@@ -237,11 +257,13 @@ impl Dispatch<river_xkb_binding_v1::RiverXkbBindingV1, ()> for AppData {
 
         match event {
             river_xkb_binding_v1::Event::Pressed => {
+                debug!("Key binding pressed: {:?}", object_id);
                 if let Some(action_def) = state.input_manager.handle_pressed(object_id.clone()) {
                     action::execute_config_action(state, object_id, action_def);
                 }
             }
             river_xkb_binding_v1::Event::Released => {
+                debug!("Key binding released: {:?}", object_id);
                 let _ = state
                     .timer_tx
                     .send(TimerCommand::StopRepeat(Some(object_id)));

@@ -2,13 +2,23 @@
 
 use crate::config::{Config, FocusCenteringMode};
 use crate::state::{Shuttle, WindowId};
+use tracing::trace;
 
-pub fn update_layout<ID: WindowId>(shuttle: &mut Shuttle<ID>, output_id: u32, config: &Config) {
+pub fn update_layout<ID: WindowId + std::fmt::Debug>(
+    shuttle: &mut Shuttle<ID>,
+    output_id: u32,
+    config: &Config,
+) {
     let gap = config.layout.gaps;
     let screen_width = config.output.width;
     let screen_height = config.output.height;
     let available_width = screen_width - (gap * 2.0);
     let default_prop = config.layout.default_column_width.proportion;
+
+    trace!(
+        "--- Layout Engine Update Started | Output: {} ---",
+        output_id
+    );
 
     if let Some(output) = shuttle.outputs.get_mut(&output_id) {
         if let Some(workspace) = output.workspaces.get_mut(&output.active_workspace_id) {
@@ -21,6 +31,12 @@ pub fn update_layout<ID: WindowId>(shuttle: &mut Shuttle<ID>, output_id: u32, co
                     window.width = calculated_width.max(1.0);
                     window.height = screen_height - (gap * 2.0);
                     window.world_x = current_x;
+
+                    trace!(
+                        "Window {:?} layout -> width: {}, world_x: {}",
+                        id, window.width, window.world_x
+                    );
+
                     current_x += window.width + gap;
                 }
             }
@@ -65,6 +81,11 @@ pub fn update_layout<ID: WindowId>(shuttle: &mut Shuttle<ID>, output_id: u32, co
                             }
                         }
                     }
+
+                    trace!(
+                        "Camera panning resolved -> mode: {:?}, camera_x: {}",
+                        center_mode, workspace.camera_x
+                    );
                 }
             }
 
@@ -73,6 +94,8 @@ pub fn update_layout<ID: WindowId>(shuttle: &mut Shuttle<ID>, output_id: u32, co
                     window.screen_x = window.world_x - workspace.camera_x;
                 }
             }
+
+            trace!("--- Layout Engine Update Finished ---");
         }
     }
 }

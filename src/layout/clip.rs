@@ -7,6 +7,7 @@ use crate::protocol::river_window_manager::{
 };
 use crate::state::Shuttle;
 use std::collections::HashMap;
+use tracing::trace;
 use wayland_client::backend::ObjectId;
 
 pub fn apply_viewport_clipping(
@@ -35,6 +36,8 @@ pub fn apply_viewport_clipping(
         let viewport_left = gap;
         let viewport_right = screen_width - gap;
 
+        trace!("=== Viewport Clipping Started | Output: {} ===", output_id);
+
         for (id, node) in node_proxies {
             if active_windows.contains(id) {
                 if let Some(window) = shuttle.window_db.get(id) {
@@ -43,8 +46,13 @@ pub fn apply_viewport_clipping(
 
                     if win_x + win_w <= viewport_left || win_x >= viewport_right {
                         node.set_position(-10000, -10000);
+                        trace!("Node {:?} -> Hidden (Out of Viewport)", id);
                     } else {
                         node.set_position(win_x as i32, gap as i32);
+                        trace!(
+                            "Node {:?} -> Placed at X: {}, Y: {}",
+                            id, win_x as i32, gap as i32
+                        );
                     }
                 }
             } else {
@@ -115,6 +123,11 @@ pub fn apply_viewport_clipping(
                     }
 
                     if content_clip_w > 0 {
+                        trace!(
+                            "Window {:?} -> Content Clip: (x:{}, w:{}), Outer Clip: (x:{}, w:{})",
+                            id, content_clip_x, content_clip_w, outer_clip_x, outer_clip_w
+                        );
+
                         proxy.set_content_clip_box(content_clip_x, 0, content_clip_w, target_h);
                         proxy.set_clip_box(
                             outer_clip_x,
@@ -123,11 +136,14 @@ pub fn apply_viewport_clipping(
                             outer_clip_h.max(0),
                         );
                     } else {
+                        trace!("Window {:?} -> Fully Clipped (Invisible)", id);
+
                         proxy.set_content_clip_box(0, 0, 0, 0);
                         proxy.set_clip_box(0, 0, 0, 0);
                     }
                 }
             }
         }
+        trace!("=== Viewport Clipping Finished ===");
     }
 }

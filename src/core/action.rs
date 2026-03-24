@@ -3,18 +3,25 @@
 use crate::config;
 use crate::core::repeat;
 use crate::state::{AppData, TimerCommand};
+use std::process::Stdio;
+use tracing::{debug, error, info};
 use wayland_client::backend::ObjectId;
 
 pub fn execute_config_action(state: &mut AppData, object_id: ObjectId, action: config::Action) {
+    debug!("Executing action: {:?}", action);
+
     match action {
         config::Action::Spawn { args } => {
             if !args.is_empty() {
+                info!("Spawning process: {:?}", args);
                 let mut command = std::process::Command::new(&args[0]);
                 if args.len() > 1 {
                     command.args(&args[1..]);
                 }
+                command.stdout(Stdio::null());
+                command.stderr(Stdio::null());
                 if let Err(e) = command.spawn() {
-                    eprintln!("Failed to spawn {:?}: {}", args, e);
+                    error!("Failed to spawn {:?}: {}", args, e);
                 }
             }
         }
@@ -60,11 +67,11 @@ pub fn execute_config_action(state: &mut AppData, object_id: ObjectId, action: c
             }
         }
         config::Action::Quit => {
-            println!("Initiating graceful shutdown...");
-            std::process::Command::new("riverctl")
-                .arg("exit")
-                .spawn()
-                .ok();
+            info!("Initiating graceful shutdown via Wayland protocol...");
+
+            if let Some(wm) = &state.window_manager {
+                wm.exit_session();
+            }
             state.loop_signal.stop();
         }
         config::Action::SetColumnWidth { proportion } => {
@@ -77,6 +84,7 @@ pub fn execute_config_action(state: &mut AppData, object_id: ObjectId, action: c
 
                             let new_prop = (current + proportion).clamp(0.1, 2.0);
                             window.custom_proportion = Some(new_prop);
+                            debug!("Set custom width proportion to: {}", new_prop);
                         }
                     }
                 }
@@ -108,6 +116,7 @@ pub fn execute_config_action(state: &mut AppData, object_id: ObjectId, action: c
                                     }
                                 }
                                 window.custom_proportion = Some(next_prop);
+                                debug!("Switched to preset width proportion: {}", next_prop);
                             }
                         }
                     }
@@ -122,6 +131,7 @@ pub fn execute_config_action(state: &mut AppData, object_id: ObjectId, action: c
                     if let Some(focused) = ws.focused_window() {
                         if let Some(window) = state.shuttle.window_db.get_mut(&focused) {
                             window.custom_proportion = Some(1.0);
+                            debug!("Maximized window column width to 1.0");
                         }
                     }
                 }

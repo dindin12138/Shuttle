@@ -3,10 +3,12 @@
 mod config;
 pub mod core;
 pub mod layout;
+mod log;
 mod protocol;
 pub mod state;
 
 use crate::state::{AppData, RiverState, TimerCommand};
+use tracing::{error, info};
 
 use calloop::EventLoop;
 use calloop::channel::{Event as ChannelEvent, channel};
@@ -17,6 +19,10 @@ use wayland_client::{Connection, EventQueue, Proxy};
 use protocol::river_window_manager::river_seat_v1::Modifiers as RiverModifiers;
 
 fn main() {
+    let _guard = log::init();
+
+    info!("Starting Shuttle Window Manager...");
+
     let mut event_loop: EventLoop<AppData> = EventLoop::try_new().unwrap();
     let loop_handle = event_loop.handle();
     let loop_signal = event_loop.get_signal();
@@ -73,7 +79,7 @@ fn main() {
     };
 
     let _registry = display.get_registry(&qh, ());
-    println!("1. Querying the compositor for supported protocols...");
+    info!("Querying the compositor for supported protocols...");
 
     // First roundtrip: fetch global managers
     event_queue.roundtrip(&mut app_data).unwrap();
@@ -83,16 +89,16 @@ fn main() {
         || app_data.xkb_bindings_manager.is_none()
         || app_data.wl_seat.is_none()
     {
-        eprintln!(
+        error!(
             "Fatal error: The current Wayland environment does not support the required River v0.4.0+ protocols!"
         );
-        eprintln!(
+        error!(
             "(This is expected behavior in the current NixOS stable branch. Code compiled successfully, exiting safely.)"
         );
         exit(0);
     }
 
-    println!("2. Waiting for River to initialize Seat resources...");
+    info!("Waiting for River to initialize Seat resources...");
 
     // Second roundtrip: fetch the initial Seat events sent by River
     event_queue.roundtrip(&mut app_data).unwrap();
@@ -100,12 +106,12 @@ fn main() {
     let river_seat = match app_data.river_seat.as_ref() {
         Some(s) => s.clone(),
         None => {
-            eprintln!("Fatal error: The River compositor did not emit a river_seat event!");
+            error!("Fatal error: The River compositor did not emit a river_seat event!");
             exit(0);
         }
     };
 
-    println!("Resources acquired successfully. Registering keybindings...");
+    info!("Resources acquired successfully. Registering keybindings...");
 
     // 1. Create a mock configuration
 
@@ -129,7 +135,7 @@ fn main() {
 
     // 3. Commit the Manage Sequence
     // app_data.window_manager.as_ref().unwrap().manage_finish();
-    println!("Keybindings registered successfully. Entering event loop...");
+    info!("Keybindings registered successfully. Entering event loop...");
 
     app_data.request_manage();
 

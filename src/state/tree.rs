@@ -1,8 +1,8 @@
-// src/state.rs
+// src/state/tree.rs (或 src/state.rs)
 
 use std::collections::HashMap;
 use std::fmt::Debug;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 use crate::config::FocusCenteringMode;
 use crate::state::window::{Window, WindowId};
@@ -64,6 +64,8 @@ impl<ID: WindowId> Workspace<ID> {
             self.windows.push(id.clone());
         }
 
+        debug!("Window inserted into workspace: {:?}", id);
+
         if focus_immediately {
             self.focus_window(id);
         } else {
@@ -76,6 +78,7 @@ impl<ID: WindowId> Workspace<ID> {
     pub fn remove_window(&mut self, id: ID) {
         if let Some(idx) = self.windows.iter().position(|w| w == &id) {
             self.windows.remove(idx);
+            debug!("Window removed from workspace layout: {:?}", id);
         }
 
         self.focus_stack.retain(|w| w != &id);
@@ -134,7 +137,7 @@ impl<ID: WindowId> Workspace<ID> {
 
         if new_idx >= 0 && (new_idx as usize) < self.windows.len() {
             self.windows.swap(current_idx, new_idx as usize);
-            tracing::info!("Moved window {:?} to index {}", focused_id, new_idx);
+            info!("Moved window {:?} to index {}", focused_id, new_idx);
         }
     }
 }
@@ -173,10 +176,13 @@ impl<ID: WindowId> Output<ID> {
     }
 
     pub fn switch_workspace(&mut self, target: u32) {
-        self.active_workspace_id = target;
-        self.workspaces
-            .entry(target)
-            .or_insert_with(|| Workspace::new());
+        if self.active_workspace_id != target {
+            info!("Switched to workspace: {}", target);
+            self.active_workspace_id = target;
+            self.workspaces
+                .entry(target)
+                .or_insert_with(|| Workspace::new());
+        }
     }
 
     pub fn move_focused_to_workspace(&mut self, target: u32) {
@@ -198,6 +204,8 @@ impl<ID: WindowId> Output<ID> {
                 .workspaces
                 .entry(target)
                 .or_insert_with(|| Workspace::new());
+
+            info!("Moved window {:?} to workspace {}", id, target);
             target_ws.insert_window(id, true);
         }
     }
@@ -246,7 +254,7 @@ impl<ID: WindowId> Shuttle<ID> {
 
             // Remove the entity from the primary database
             self.window_db.remove(id);
-            tracing::info!("Successfully cleaned up closed window: {:?}", id);
+            info!("Successfully cleaned up closed window: {:?}", id);
         }
     }
 }

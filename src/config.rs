@@ -4,6 +4,7 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
+use tracing::{error, info, warn};
 
 #[derive(Debug, Deserialize, Clone, Copy, PartialEq)]
 #[serde(rename_all = "kebab-case")]
@@ -191,15 +192,15 @@ impl Config {
         if let Ok(content) = fs::read_to_string(&path) {
             match toml::from_str::<Config>(&content) {
                 Ok(config) => {
-                    println!("Configuration file loaded: {:?}", path);
+                    info!("Configuration file loaded: {:?}", path);
                     return config;
                 }
                 Err(e) => {
-                    eprintln!("Configuration parsing failed: {}", e);
+                    error!("Configuration parsing failed: {}", e);
                 }
             }
         } else {
-            println!(
+            info!(
                 "Configuration file not found at {:?}. Using defaults.",
                 path
             );
@@ -253,7 +254,7 @@ fn parse_single_modifier(mod_str: &str) -> u32 {
         "mod5" => 128,
         "none" | "" => 0,
         _ => {
-            eprintln!("Warning: Unknown modifier '{}'", mod_str);
+            warn!("Unknown modifier '{}' in config, ignoring.", mod_str);
             0
         }
     }
@@ -279,7 +280,7 @@ pub fn parse_keysym(key_str: &str) -> u32 {
             "xf86audiolowervolume" => 0x1008ff12,
             "xf86audiomute" => 0x1008ff13,
             _ => {
-                eprintln!("Warning: Unknown key '{}'", key_str);
+                warn!("Unknown key '{}' in config, ignoring.", key_str);
                 0
             }
         }
