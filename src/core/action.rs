@@ -67,6 +67,68 @@ pub fn execute_config_action(state: &mut AppData, object_id: ObjectId, action: c
                 .ok();
             state.loop_signal.stop();
         }
+        config::Action::SetColumnWidth { proportion } => {
+            if let Some(output) = state.shuttle.outputs.get_mut(&1) {
+                if let Some(ws) = output.workspaces.get(&output.active_workspace_id) {
+                    if let Some(focused) = ws.focused_window() {
+                        if let Some(window) = state.shuttle.window_db.get_mut(&focused) {
+                            let default_prop = state.config.layout.default_column_width.proportion;
+                            let current = window.custom_proportion.unwrap_or(default_prop);
+
+                            let new_prop = (current + proportion).clamp(0.1, 2.0);
+                            window.custom_proportion = Some(new_prop);
+                        }
+                    }
+                }
+            }
+            crate::layout::engine::update_layout(&mut state.shuttle, 1, &state.config);
+            state.request_manage();
+        }
+
+        config::Action::SwitchPresetColumnWidth => {
+            if let Some(output) = state.shuttle.outputs.get_mut(&1) {
+                if let Some(ws) = output.workspaces.get(&output.active_workspace_id) {
+                    if let Some(focused) = ws.focused_window() {
+                        if let Some(window) = state.shuttle.window_db.get_mut(&focused) {
+                            let default_prop = state.config.layout.default_column_width.proportion;
+                            let current = window.custom_proportion.unwrap_or(default_prop);
+                            let presets = &state.config.layout.preset_column_widths;
+
+                            if !presets.is_empty() {
+                                let mut sorted = presets.clone();
+                                sorted.sort_by(|a, b| {
+                                    a.proportion.partial_cmp(&b.proportion).unwrap()
+                                });
+
+                                let mut next_prop = sorted[0].proportion;
+                                for p in &sorted {
+                                    if p.proportion > current + 0.01 {
+                                        next_prop = p.proportion;
+                                        break;
+                                    }
+                                }
+                                window.custom_proportion = Some(next_prop);
+                            }
+                        }
+                    }
+                }
+            }
+            crate::layout::engine::update_layout(&mut state.shuttle, 1, &state.config);
+            state.request_manage();
+        }
+        config::Action::MaximizeColumn => {
+            if let Some(output) = state.shuttle.outputs.get_mut(&1) {
+                if let Some(ws) = output.workspaces.get(&output.active_workspace_id) {
+                    if let Some(focused) = ws.focused_window() {
+                        if let Some(window) = state.shuttle.window_db.get_mut(&focused) {
+                            window.custom_proportion = Some(1.0);
+                        }
+                    }
+                }
+            }
+            crate::layout::engine::update_layout(&mut state.shuttle, 1, &state.config);
+            state.request_manage();
+        }
     }
 }
 

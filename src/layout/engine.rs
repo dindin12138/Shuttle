@@ -7,7 +7,8 @@ pub fn update_layout<ID: WindowId>(shuttle: &mut Shuttle<ID>, output_id: u32, co
     let gap = config.layout.gaps;
     let screen_width = config.output.width;
     let screen_height = config.output.height;
-    let column_width = config.layout.default_column_width;
+    let available_width = screen_width - (gap * 2.0);
+    let default_prop = config.layout.default_column_width.proportion;
 
     if let Some(output) = shuttle.outputs.get_mut(&output_id) {
         if let Some(workspace) = output.workspaces.get_mut(&output.active_workspace_id) {
@@ -15,7 +16,9 @@ pub fn update_layout<ID: WindowId>(shuttle: &mut Shuttle<ID>, output_id: u32, co
 
             for id in &workspace.windows {
                 if let Some(window) = shuttle.window_db.get_mut(id) {
-                    window.width = column_width;
+                    let prop = window.custom_proportion.unwrap_or(default_prop);
+
+                    window.width = available_width * prop;
                     window.height = screen_height - (gap * 2.0);
                     window.world_x = current_x;
                     current_x += window.width + gap;

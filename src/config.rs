@@ -19,6 +19,17 @@ impl Default for FocusCenteringMode {
     }
 }
 
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq)]
+pub struct Proportion {
+    pub proportion: f32,
+}
+
+impl Default for Proportion {
+    fn default() -> Self {
+        Self { proportion: 1.0 }
+    }
+}
+
 #[derive(Debug, Deserialize, PartialEq, Clone)]
 #[serde(tag = "action", rename_all = "snake_case")]
 pub enum Action {
@@ -31,22 +42,39 @@ pub enum Action {
     MoveRight,
     FocusWorkspace { target: u32 },
     MoveToWorkspace { target: u32 },
+    SetColumnWidth { proportion: f32 },
+    SwitchPresetColumnWidth,
+    MaximizeColumn,
 }
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct LayoutConfig {
     pub gaps: f32,
-    pub default_column_width: f32,
+
+    #[serde(default)]
+    pub default_column_width: Proportion,
+
+    #[serde(default = "default_presets")]
+    pub preset_column_widths: Vec<Proportion>,
 
     #[serde(default)]
     pub center_focused_column: FocusCenteringMode,
+}
+
+fn default_presets() -> Vec<Proportion> {
+    vec![
+        Proportion { proportion: 0.333 },
+        Proportion { proportion: 0.5 },
+        Proportion { proportion: 0.667 },
+    ]
 }
 
 impl Default for LayoutConfig {
     fn default() -> Self {
         Self {
             gaps: 20.0,
-            default_column_width: 800.0,
+            default_column_width: Proportion::default(),
+            preset_column_widths: default_presets(),
             center_focused_column: FocusCenteringMode::Never,
         }
     }
@@ -175,6 +203,8 @@ pub fn parse_keysym(key_str: &str) -> u32 {
             "right" => 0xff53,
             "up" => 0xff52,
             "down" => 0xff54,
+            "minus" => 0x002d,
+            "equal" => 0x003d,
             "xf86audioraisevolume" => 0x1008ff11,
             "xf86audiolowervolume" => 0x1008ff12,
             "xf86audiomute" => 0x1008ff13,

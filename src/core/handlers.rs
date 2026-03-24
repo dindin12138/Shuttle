@@ -90,9 +90,16 @@ impl Dispatch<river_window_manager_v1::RiverWindowManagerV1, ()> for AppData {
 
                 // Initialize the window with temporary dimensions.
                 // Actual dimensions will be provided via the Dimensions event.
-                let default_w = state.config.layout.default_column_width;
-                let target_h = state.config.output.height - (state.config.layout.gaps * 2.0);
-                let new_window = state::Window::new(object_id.clone(), default_w, target_h);
+                let gap = state.config.layout.gaps;
+                let screen_width = state.config.output.width;
+                let available_width = screen_width - (gap * 2.0);
+
+                let default_prop = state.config.layout.default_column_width.proportion;
+                let initial_width = available_width * default_prop;
+                let target_h = state.config.output.height - (gap * 2.0);
+
+                let new_window = state::Window::new(object_id.clone(), initial_width, target_h);
+
                 state
                     .shuttle
                     .window_db

@@ -47,6 +47,8 @@ pub struct Window<ID: WindowId> {
 
     /// A mark used for delayed cleanup (tombstone).
     pub is_closed: bool,
+
+    pub custom_proportion: Option<f32>,
 }
 
 impl<ID: WindowId> Window<ID> {
@@ -62,6 +64,7 @@ impl<ID: WindowId> Window<ID> {
             is_floating: false,
             anim_state: AnimationState::default(),
             is_closed: false,
+            custom_proportion: None,
         }
     }
 }
