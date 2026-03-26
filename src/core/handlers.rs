@@ -245,14 +245,19 @@ impl Dispatch<river_layer_shell_output_v1::RiverLayerShellOutputV1, ()> for AppD
             x, y, width, height
         );
 
-        if let Some(output) = state.shuttle.outputs.get_mut(&1) {
-            output.usable_area = Some(UsableArea {
-                x,
-                y,
-                width,
-                height,
-            });
-        }
+        let output = state
+            .shuttle
+            .outputs
+            .entry(1)
+            .or_insert_with(state::Output::new);
+
+        output.usable_area = Some(UsableArea {
+            x,
+            y,
+            width,
+            height,
+        });
+
         state.request_manage();
     }
 }
