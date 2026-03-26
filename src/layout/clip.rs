@@ -29,12 +29,22 @@ pub fn apply_viewport_clipping(
             .get(&output.active_workspace_id)
             .and_then(|ws| ws.focused_window());
 
-        let screen_width = config.output.width;
+        let screen_width = output
+            .usable_area
+            .map(|a| a.width as f32)
+            .unwrap_or(config.output.width);
+        let screen_height = output
+            .usable_area
+            .map(|a| a.height as f32)
+            .unwrap_or(config.output.height);
+        let screen_x_offset = output.usable_area.map(|a| a.x as f32).unwrap_or(0.0);
+        let screen_y_offset = output.usable_area.map(|a| a.y as f32).unwrap_or(0.0);
+
         let gap = config.layout.gaps;
 
-        let target_h = (config.output.height - (gap * 2.0)) as i32;
-        let viewport_left = gap;
-        let viewport_right = screen_width - gap;
+        let target_h = (screen_height - (gap * 2.0)) as i32;
+        let viewport_left = screen_x_offset + gap;
+        let viewport_right = screen_x_offset + screen_width - gap;
 
         trace!("=== Viewport Clipping Started | Output: {} ===", output_id);
 
@@ -48,10 +58,11 @@ pub fn apply_viewport_clipping(
                         node.set_position(-10000, -10000);
                         trace!("Node {:?} -> Hidden (Out of Viewport)", id);
                     } else {
-                        node.set_position(win_x as i32, gap as i32);
+                        let win_y = screen_y_offset + gap;
+                        node.set_position(win_x as i32, win_y as i32);
                         trace!(
                             "Node {:?} -> Placed at X: {}, Y: {}",
-                            id, win_x as i32, gap as i32
+                            id, win_x as i32, win_y as i32
                         );
                     }
                 }

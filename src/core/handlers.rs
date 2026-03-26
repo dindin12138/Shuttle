@@ -111,26 +111,35 @@ impl Dispatch<river_window_manager_v1::RiverWindowManagerV1, ()> for AppData {
 
             river_window_manager_v1::Event::Output { id } => {
                 info!("Received River Output: {:?}", id.id());
-                // 向系统要屏幕的 Layer Shell 控制权！
                 if let Some(ls_mgr) = &state.layer_shell_manager {
                     let _ = ls_mgr.get_output(&id, _qh, ());
                 }
             }
 
-            // 1. New window creation
             river_window_manager_v1::Event::Window { id } => {
                 let object_id = id.id();
                 info!("New window detected: {:?}", object_id);
 
                 let gap = state.config.layout.gaps;
-                let screen_width = state.config.output.width;
-                let available_width = screen_width - (gap * 2.0);
 
+                let output_id = 1;
+                let (screen_width, screen_height) =
+                    if let Some(output) = state.shuttle.outputs.get(&output_id) {
+                        if let Some(area) = output.usable_area {
+                            (area.width as f32, area.height as f32)
+                        } else {
+                            (state.config.output.width, state.config.output.height)
+                        }
+                    } else {
+                        (state.config.output.width, state.config.output.height)
+                    };
+
+                let available_width = screen_width - (gap * 2.0);
                 let default_prop = state.config.layout.default_column_width.proportion;
 
                 let initial_width = (default_prop * (available_width + gap)) - gap;
                 let initial_width = initial_width.max(1.0);
-                let target_h = state.config.output.height - (gap * 2.0);
+                let target_h = screen_height - (gap * 2.0);
 
                 let new_window = state::Window::new(object_id.clone(), initial_width, target_h);
 
@@ -154,7 +163,6 @@ impl Dispatch<river_window_manager_v1::RiverWindowManagerV1, ()> for AppData {
                 state.request_manage();
             }
 
-            // 2. Manage Sequence
             river_window_manager_v1::Event::ManageStart => {
                 trace!("ManageStart sequence initiated");
 
@@ -193,7 +201,7 @@ impl Dispatch<river_window_manager_v1::RiverWindowManagerV1, ()> for AppData {
                 state.window_manager.as_ref().unwrap().manage_finish();
                 state.river_state = crate::RiverState::WaitingForRender;
             }
-            // 3. Render Sequence
+
             river_window_manager_v1::Event::RenderStart => {
                 trace!("RenderStart sequence initiated");
 

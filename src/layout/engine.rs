@@ -10,9 +10,6 @@ pub fn update_layout<ID: WindowId + std::fmt::Debug>(
     config: &Config,
 ) {
     let gap = config.layout.gaps;
-    let screen_width = config.output.width;
-    let screen_height = config.output.height;
-    let available_width = screen_width - (gap * 2.0);
     let default_prop = config.layout.default_column_width.proportion;
 
     trace!(
@@ -21,6 +18,18 @@ pub fn update_layout<ID: WindowId + std::fmt::Debug>(
     );
 
     if let Some(output) = shuttle.outputs.get_mut(&output_id) {
+        let screen_width = output
+            .usable_area
+            .map(|a| a.width as f32)
+            .unwrap_or(config.output.width);
+        let screen_height = output
+            .usable_area
+            .map(|a| a.height as f32)
+            .unwrap_or(config.output.height);
+        let screen_x_offset = output.usable_area.map(|a| a.x as f32).unwrap_or(0.0);
+
+        let available_width = screen_width - (gap * 2.0);
+
         if let Some(workspace) = output.workspaces.get_mut(&output.active_workspace_id) {
             let mut current_x = gap;
 
@@ -44,7 +53,6 @@ pub fn update_layout<ID: WindowId + std::fmt::Debug>(
             if let Some(focused_id) = workspace.focused_window() {
                 if let Some(window) = shuttle.window_db.get(&focused_id) {
                     let center_mode = config.layout.center_focused_column;
-                    let available_width = screen_width - (gap * 2.0);
 
                     match center_mode {
                         FocusCenteringMode::Always => {
@@ -91,7 +99,7 @@ pub fn update_layout<ID: WindowId + std::fmt::Debug>(
 
             for id in &workspace.windows {
                 if let Some(window) = shuttle.window_db.get_mut(id) {
-                    window.screen_x = window.world_x - workspace.camera_x;
+                    window.screen_x = window.world_x - workspace.camera_x + screen_x_offset;
                 }
             }
 
