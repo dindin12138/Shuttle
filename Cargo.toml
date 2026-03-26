@@ -27,3 +27,5 @@ tracing-subscriber = { version = "0.3", features = [
 tracing-appender = "0.2"
 
 bitflags = "2.4"
+
+notify = "6.1"

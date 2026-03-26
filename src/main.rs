@@ -16,6 +16,8 @@ use calloop_wayland_source::WaylandSource;
 use std::process::exit;
 use wayland_client::{Connection, EventQueue, Proxy};
 
+use notify::{Config as NotifyConfig, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
+
 use protocol::river_window_manager::river_seat_v1::Modifiers as RiverModifiers;
 
 fn main() {
@@ -27,10 +29,11 @@ fn main() {
     let loop_handle = event_loop.handle();
     let loop_signal = event_loop.get_signal();
 
-    // Create a safe channel that spans across lifetimes
+    // Create a safe channel that spans across lifetimes for Key Repeat
     let (timer_tx, timer_rx) = channel::<TimerCommand>();
 
-    // Listen to the channel: when a timer command is received, insert the timer into the loop
+    let (config_reload_tx, config_reload_rx) = channel::<()>();
+
     let loop_handle_for_channel = loop_handle.clone();
     loop_handle
         .insert_source(timer_rx, move |event, _, app_data: &mut AppData| {
@@ -50,6 +53,36 @@ fn main() {
             }
         })
         .unwrap();
+
+    let config_path = config::Config::get_path();
+    let config_dir = config::Config::get_dir();
+
+    let watch_path = config_path.clone();
+
+    let mut watcher = RecommendedWatcher::new(
+        move |res: Result<notify::Event, notify::Error>| match res {
+            Ok(event) => {
+                if event.paths.iter().any(|p| p == &watch_path) {
+                    match event.kind {
+                        EventKind::Modify(_) | EventKind::Create(_) => {
+                            let _ = config_reload_tx.send(());
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            Err(e) => error!("Watch error: {:?}", e),
+        },
+        NotifyConfig::default(),
+    )
+    .unwrap();
+
+    if config_dir.exists() {
+        watcher
+            .watch(&config_dir, RecursiveMode::NonRecursive)
+            .unwrap();
+        info!("Live-reloading activated: watching {:?}", config_path);
+    }
 
     // Connect to the Wayland environment
     let conn = Connection::connect_to_env().expect("Failed to connect to the Wayland environment.");
@@ -114,32 +147,56 @@ fn main() {
 
     info!("Resources acquired successfully. Registering keybindings...");
 
-    // 1. Create a mock configuration
-
     let prepared = app_data.input_manager.prepare_bindings(&user_config);
     let xkb_manager = app_data.xkb_bindings_manager.as_ref().unwrap();
 
-    // 2. Iterate and send requests to River
     for (mods, keysym, action) in prepared {
         let modifiers = RiverModifiers::from_bits_truncate(mods);
-
-        // Register the binding using the appropriate river_seat
         let binding_proxy = xkb_manager.get_xkb_binding(&river_seat, keysym, modifiers, &qh, ());
-
-        // binding_proxy.enable();
         app_data.pending_bindings.push(binding_proxy.clone());
-
         app_data
             .input_manager
             .register_wayland_object(binding_proxy.id(), action);
     }
 
-    // 3. Commit the Manage Sequence
+    let qh_for_reload = qh.clone();
+    loop_handle
+        .insert_source(config_reload_rx, move |_, _, app_data: &mut AppData| {
+            info!("🔄 Config file changed! Executing live-reload...");
+
+            app_data.config = config::Config::load();
+
+            for binding in app_data.active_bindings.drain(..) {
+                binding.destroy();
+            }
+            app_data.pending_bindings.clear();
+
+            app_data.input_manager = core::input::InputManager::new();
+
+            if let (Some(xkb_mgr), Some(seat)) =
+                (&app_data.xkb_bindings_manager, &app_data.river_seat)
+            {
+                let new_bindings = app_data.input_manager.prepare_bindings(&app_data.config);
+                for (mods, keysym, action) in new_bindings {
+                    let modifiers = RiverModifiers::from_bits_truncate(mods);
+                    let binding_proxy =
+                        xkb_mgr.get_xkb_binding(seat, keysym, modifiers, &qh_for_reload, ());
+                    app_data.pending_bindings.push(binding_proxy.clone());
+                    app_data
+                        .input_manager
+                        .register_wayland_object(binding_proxy.id(), action);
+                }
+            }
+
+            app_data.request_manage();
+            info!("Live-reload complete!");
+        })
+        .unwrap();
+
     info!("Keybindings registered successfully. Entering event loop...");
 
     app_data.request_manage();
 
-    // Hook into the calloop event loop
     let wayland_source = WaylandSource::new(conn, event_queue);
     loop_handle
         .insert_source(
@@ -147,6 +204,8 @@ fn main() {
             |_, queue: &mut EventQueue<AppData>, app_data| queue.dispatch_pending(app_data),
         )
         .unwrap();
+
+    let _watcher_keeper = watcher;
 
     event_loop.run(None, &mut app_data, |_| {}).unwrap();
 }

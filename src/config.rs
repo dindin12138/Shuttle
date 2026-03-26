@@ -178,12 +178,13 @@ pub struct Config {
 }
 
 impl Config {
-    pub fn get_path() -> PathBuf {
+    pub fn get_dir() -> PathBuf {
         let home = std::env::var("HOME").expect("HOME environment variable not found.");
-        PathBuf::from(home)
-            .join(".config")
-            .join("shuttle")
-            .join("config.toml")
+        PathBuf::from(home).join(".config").join("shuttle")
+    }
+
+    pub fn get_path() -> PathBuf {
+        Self::get_dir().join("config.toml")
     }
 
     pub fn load() -> Self {
