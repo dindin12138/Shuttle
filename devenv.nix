@@ -9,7 +9,6 @@
     wayland-protocols
     wayland-scanner
     libxkbcommon
-    river
   ];
   env.RUST_BACKTRACE = "1";
   enterShell = ''

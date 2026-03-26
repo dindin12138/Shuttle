@@ -1,4 +1,4 @@
-// src/state/tree.rs (或 src/state.rs)
+// src/state/tree.rs
 
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -6,6 +6,14 @@ use tracing::{debug, info, warn};
 
 use crate::config::FocusCenteringMode;
 use crate::state::window::{Window, WindowId};
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct UsableArea {
+    pub x: i32,
+    pub y: i32,
+    pub width: i32,
+    pub height: i32,
+}
 
 /// Workspace (The Canvas / Scroll).
 ///
@@ -153,6 +161,8 @@ pub struct Output<ID: WindowId> {
 
     /// The ID of the currently active workspace displayed on this output.
     pub active_workspace_id: u32,
+
+    pub usable_area: Option<UsableArea>,
 }
 
 impl<ID: WindowId> Output<ID> {
@@ -164,6 +174,7 @@ impl<ID: WindowId> Output<ID> {
         Self {
             workspaces,
             active_workspace_id: 1,
+            usable_area: None,
         }
     }
 

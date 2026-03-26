@@ -69,6 +69,7 @@ fn main() {
         wl_seat: None,
         window_manager: None,
         xkb_bindings_manager: None,
+        layer_shell_manager: None,
         river_seat: None,
         window_proxies: std::collections::HashMap::new(),
         node_proxies: std::collections::HashMap::new(),
@@ -84,9 +85,9 @@ fn main() {
     // First roundtrip: fetch global managers
     event_queue.roundtrip(&mut app_data).unwrap();
 
-    // Environment checks
     if app_data.window_manager.is_none()
         || app_data.xkb_bindings_manager.is_none()
+        || app_data.layer_shell_manager.is_none()
         || app_data.wl_seat.is_none()
     {
         error!(
@@ -134,7 +135,6 @@ fn main() {
     }
 
     // 3. Commit the Manage Sequence
-    // app_data.window_manager.as_ref().unwrap().manage_finish();
     info!("Keybindings registered successfully. Entering event loop...");
 
     app_data.request_manage();

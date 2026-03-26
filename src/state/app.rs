@@ -8,6 +8,7 @@ use wayland_client::protocol::wl_seat;
 use crate::config::Config;
 use crate::core::input::InputManager;
 use crate::core::repeat::{Action as RepeatAction, KeyRepeatManager};
+use crate::protocol::river_layer_shell::river_layer_shell_v1;
 use crate::protocol::river_window_manager::{
     river_node_v1, river_seat_v1, river_window_manager_v1, river_window_v1,
 };
@@ -44,6 +45,7 @@ pub struct AppData {
     pub wl_seat: Option<wl_seat::WlSeat>,
     pub window_manager: Option<river_window_manager_v1::RiverWindowManagerV1>,
     pub xkb_bindings_manager: Option<river_xkb_bindings_v1::RiverXkbBindingsV1>,
+    pub layer_shell_manager: Option<river_layer_shell_v1::RiverLayerShellV1>,
     pub river_seat: Option<river_seat_v1::RiverSeatV1>,
 
     pub window_proxies: std::collections::HashMap<ObjectId, river_window_v1::RiverWindowV1>,

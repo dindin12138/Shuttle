@@ -2,12 +2,15 @@
 
 use crate::core::action;
 use crate::state;
-use crate::state::{AppData, TimerCommand};
+use crate::state::{AppData, TimerCommand, UsableArea};
 use tracing::{debug, error, info, trace};
 
 use wayland_client::protocol::{wl_registry, wl_seat};
 use wayland_client::{Connection, Dispatch, Proxy, QueueHandle};
 
+use crate::protocol::river_layer_shell::{
+    river_layer_shell_output_v1, river_layer_shell_seat_v1, river_layer_shell_v1,
+};
 use crate::protocol::river_window_manager::{
     river_node_v1, river_output_v1, river_seat_v1, river_window_manager_v1, river_window_v1,
 };
@@ -53,6 +56,17 @@ impl Dispatch<wl_registry::WlRegistry, ()> for AppData {
                         ),
                     );
                 }
+                "river_layer_shell_v1" => {
+                    info!("Bound River protocol: river_layer_shell_v1");
+                    state.layer_shell_manager = Some(
+                        registry.bind::<river_layer_shell_v1::RiverLayerShellV1, _, _>(
+                            name,
+                            1,
+                            qh,
+                            (),
+                        ),
+                    );
+                }
                 _ => {}
             }
         }
@@ -89,7 +103,18 @@ impl Dispatch<river_window_manager_v1::RiverWindowManagerV1, ()> for AppData {
         match event {
             river_window_manager_v1::Event::Seat { id } => {
                 debug!("Received River Seat: {:?}", id.id());
-                state.river_seat = Some(id);
+                state.river_seat = Some(id.clone());
+                if let Some(ls_mgr) = &state.layer_shell_manager {
+                    let _ = ls_mgr.get_seat(&id, _qh, ());
+                }
+            }
+
+            river_window_manager_v1::Event::Output { id } => {
+                info!("Received River Output: {:?}", id.id());
+                // 向系统要屏幕的 Layer Shell 控制权！
+                if let Some(ls_mgr) = &state.layer_shell_manager {
+                    let _ = ls_mgr.get_output(&id, _qh, ());
+                }
             }
 
             // 1. New window creation
@@ -97,8 +122,6 @@ impl Dispatch<river_window_manager_v1::RiverWindowManagerV1, ()> for AppData {
                 let object_id = id.id();
                 info!("New window detected: {:?}", object_id);
 
-                // Initialize the window with temporary dimensions.
-                // Actual dimensions will be provided via the Dimensions event.
                 let gap = state.config.layout.gaps;
                 let screen_width = state.config.output.width;
                 let available_width = screen_width - (gap * 2.0);
@@ -116,7 +139,6 @@ impl Dispatch<river_window_manager_v1::RiverWindowManagerV1, ()> for AppData {
                     .window_db
                     .insert(object_id.clone(), new_window);
 
-                // Acquire the node proxy for physical positioning
                 let node = id.get_node(_qh, ());
                 state.node_proxies.insert(object_id.clone(), node);
                 state.window_proxies.insert(object_id.clone(), id.clone());
@@ -129,11 +151,10 @@ impl Dispatch<river_window_manager_v1::RiverWindowManagerV1, ()> for AppData {
                     .current_workspace_mut();
                 workspace.insert_window(object_id, true);
 
-                // Mark management state as dirty to trigger a new manage sequence
                 state.request_manage();
             }
 
-            // 2. Manage Sequence: Propose logical properties (e.g., dimensions)
+            // 2. Manage Sequence
             river_window_manager_v1::Event::ManageStart => {
                 trace!("ManageStart sequence initiated");
 
@@ -172,7 +193,7 @@ impl Dispatch<river_window_manager_v1::RiverWindowManagerV1, ()> for AppData {
                 state.window_manager.as_ref().unwrap().manage_finish();
                 state.river_state = crate::RiverState::WaitingForRender;
             }
-            // 3. Render Sequence: Apply physical coordinates to nodes
+            // 3. Render Sequence
             river_window_manager_v1::Event::RenderStart => {
                 trace!("RenderStart sequence initiated");
 
@@ -195,6 +216,39 @@ impl Dispatch<river_window_manager_v1::RiverWindowManagerV1, ()> for AppData {
     }
 }
 
+impl Dispatch<river_layer_shell_output_v1::RiverLayerShellOutputV1, ()> for AppData {
+    fn event(
+        state: &mut Self,
+        _: &river_layer_shell_output_v1::RiverLayerShellOutputV1,
+        event: river_layer_shell_output_v1::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<AppData>,
+    ) {
+        let river_layer_shell_output_v1::Event::NonExclusiveArea {
+            x,
+            y,
+            width,
+            height,
+        } = event;
+
+        info!(
+            "Layer Shell NonExclusiveArea updated: x={}, y={}, w={}, h={}",
+            x, y, width, height
+        );
+
+        if let Some(output) = state.shuttle.outputs.get_mut(&1) {
+            output.usable_area = Some(UsableArea {
+                x,
+                y,
+                width,
+                height,
+            });
+        }
+        state.request_manage();
+    }
+}
+
 impl Dispatch<river_window_v1::RiverWindowV1, ()> for AppData {
     fn event(
         state: &mut Self,
@@ -205,38 +259,29 @@ impl Dispatch<river_window_v1::RiverWindowV1, ()> for AppData {
         _: &QueueHandle<AppData>,
     ) {
         match event {
-            // Listen for actual dimensions requested by the client application
             river_window_v1::Event::Dimensions { width, height } => {
                 let object_id = proxy.id();
                 trace!(
                     "Window {:?} dimension update: {}x{}",
                     object_id, width, height
                 );
-
                 if let Some(window) = state.shuttle.window_db.get_mut(&object_id) {
                     window.width = width as f32;
                     window.height = height as f32;
                 }
-                // Recalculate layout upon dimension changes
                 state.request_manage();
             }
-
-            // Gracefully handle window destruction
             river_window_v1::Event::Closed => {
                 let object_id = proxy.id();
                 info!("Window closed by client: {:?}", object_id);
-
                 if let Some(window) = state.shuttle.window_db.get_mut(&object_id) {
                     window.is_closed = true;
                 }
-
-                // Destroy associated proxies to free up resources
                 if let Some(node) = state.node_proxies.remove(&object_id) {
                     node.destroy();
                 }
                 state.window_proxies.remove(&object_id);
                 proxy.destroy();
-
                 state.request_manage();
             }
             _ => {}
@@ -254,7 +299,6 @@ impl Dispatch<river_xkb_binding_v1::RiverXkbBindingV1, ()> for AppData {
         _: &QueueHandle<AppData>,
     ) {
         let object_id = proxy.id();
-
         match event {
             river_xkb_binding_v1::Event::Pressed => {
                 debug!("Key binding pressed: {:?}", object_id);
@@ -276,6 +320,30 @@ impl Dispatch<river_xkb_binding_v1::RiverXkbBindingV1, ()> for AppData {
 // ==========================================
 // Required empty implementations
 // ==========================================
+
+impl Dispatch<river_layer_shell_v1::RiverLayerShellV1, ()> for AppData {
+    fn event(
+        _: &mut Self,
+        _: &river_layer_shell_v1::RiverLayerShellV1,
+        _: river_layer_shell_v1::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<AppData>,
+    ) {
+    }
+}
+
+impl Dispatch<river_layer_shell_seat_v1::RiverLayerShellSeatV1, ()> for AppData {
+    fn event(
+        _: &mut Self,
+        _: &river_layer_shell_seat_v1::RiverLayerShellSeatV1,
+        _: river_layer_shell_seat_v1::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<AppData>,
+    ) {
+    }
+}
 
 impl Dispatch<river_node_v1::RiverNodeV1, ()> for AppData {
     fn event(
